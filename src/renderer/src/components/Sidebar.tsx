@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   Plus,
   Lock,
@@ -11,8 +11,8 @@ import {
   Pencil,
   Copy,
   Trash2,
-  PanelLeftClose,
-  PanelLeftOpen
+  Pin,
+  PanelLeftClose
 } from 'lucide-react'
 import type { ClusterConnection } from '@shared/types'
 import { useApp, type Session } from '../store'
@@ -29,7 +29,15 @@ const THEME_OPTIONS: { pref: ThemePref; icon: typeof Sun; label: string }[] = [
 const UNGROUPED = ' ungrouped' // sorts/render last; never a real folder name
 const COLLAPSE_KEY = 'lodestone.rail.collapsed'
 const FOLDERS_KEY = 'lodestone.rail.folders' // folders that exist before any cluster joins them
-const MINI_KEY = 'lodestone.rail.mini' // whole-sidebar collapsed state
+const PIN_KEY = 'lodestone.rail.pinned' // pinned = full sidebar column; unpinned = icon strip + hover flyout
+
+// Hover intent: don't flash the flyout open on a drive-by cursor, and don't
+// snap it shut when the pointer briefly exits while moving to a menu.
+const HOVER_OPEN_MS = 140
+const HOVER_CLOSE_MS = 240
+
+const APP_VERSION =
+  typeof __APP_VERSION__ === 'string' && __APP_VERSION__ ? `v${__APP_VERSION__}` : ''
 
 function loadCollapsed(): Set<string> {
   try {
@@ -60,14 +68,56 @@ export function Sidebar(): React.JSX.Element {
   } = useApp()
   const { pref, setPref } = useTheme()
   const [collapsed, setCollapsed] = useState<Set<string>>(loadCollapsed)
-  const [mini, setMini] = useState<boolean>(() => localStorage.getItem(MINI_KEY) === '1')
   const [extraFolders, setExtraFolders] = useState<string[]>(loadFolders)
   const [adding, setAdding] = useState(false)
   const [newName, setNewName] = useState('')
   const [dragId, setDragId] = useState<string | null>(null)
   const [dropGroup, setDropGroup] = useState<string | null>(null)
   const [confirmId, setConfirmId] = useState<string | null>(null)
-  const [hovered, setHovered] = useState(false)
+  // Pinned (default) = sidebar is a fixed column. Unpinned = icon strip; the
+  // full sidebar appears as a flyout while hovering.
+  const [pinned, setPinned] = useState<boolean>(() => localStorage.getItem(PIN_KEY) !== '0')
+  const [flyoutOpen, setFlyoutOpen] = useState(false)
+  const hoverTimer = useRef<number | null>(null)
+
+  const clearHoverTimer = (): void => {
+    if (hoverTimer.current !== null) {
+      window.clearTimeout(hoverTimer.current)
+      hoverTimer.current = null
+    }
+  }
+
+  const scheduleFlyout = (open: boolean): void => {
+    clearHoverTimer()
+    hoverTimer.current = window.setTimeout(
+      () => setFlyoutOpen(open),
+      open ? HOVER_OPEN_MS : HOVER_CLOSE_MS
+    )
+  }
+
+  const togglePin = (): void => {
+    setPinned((p) => {
+      localStorage.setItem(PIN_KEY, p ? '0' : '1')
+      return !p
+    })
+    clearHoverTimer()
+    setFlyoutOpen(false)
+  }
+
+  // Ctrl/Cmd+B toggles the sidebar, VS Code style.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
+        e.preventDefault()
+        togglePin()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => clearHoverTimer, [])
 
   const toggle = (group: string): void => {
     setCollapsed((prev) => {
@@ -137,27 +187,26 @@ export function Sidebar(): React.JSX.Element {
 
   const confirmConn = connections.find((c) => c.id === confirmId) ?? null
 
-  const toggleMini = (): void => {
-    setMini((m) => {
-      localStorage.setItem(MINI_KEY, m ? '0' : '1')
-      return !m
-    })
-    setHovered(false)
-  }
-
   const handleSelect = (id: string): void => {
     selectCluster(id)
-    setHovered(false)
+    if (!pinned) {
+      clearHoverTimer()
+      setFlyoutOpen(false)
+    }
   }
 
-  const renderFullContent = (): React.JSX.Element => (
+  const fullSidebar = (
     <>
       <div className="rail-brand">
         <span className="wordmark">LODESTONE</span>
-        <span className="version">v0.2</span>
+        {APP_VERSION && <span className="version">{APP_VERSION}</span>}
         <span className="spacer" />
-        <button className="rail-mini-toggle inline" title="Collapse sidebar" onClick={toggleMini}>
-          <PanelLeftClose size={15} />
+        <button
+          className="rail-pin"
+          title={pinned ? 'Collapse sidebar (Ctrl+B)' : 'Pin sidebar open (Ctrl+B)'}
+          onClick={togglePin}
+        >
+          {pinned ? <PanelLeftClose size={15} /> : <Pin size={14} />}
         </button>
       </div>
 
@@ -191,7 +240,9 @@ export function Sidebar(): React.JSX.Element {
           const isUngrouped = group === UNGROUPED
           const showHeader = !isUngrouped || hasFolders
           const isCollapsed = collapsed.has(group)
-          const emptyRemovable = isUngrouped ? false : items.length === 0 && extraFolders.includes(group)
+          const emptyRemovable = isUngrouped
+            ? false
+            : items.length === 0 && extraFolders.includes(group)
           return (
             <div
               key={group}
@@ -266,6 +317,62 @@ export function Sidebar(): React.JSX.Element {
           ))}
         </div>
       </div>
+    </>
+  )
+
+  return (
+    <>
+      {pinned ? (
+        <aside className="rail">{fullSidebar}</aside>
+      ) : (
+        <aside
+          className={`rail mini ${flyoutOpen ? 'hovered' : ''}`}
+          onMouseEnter={() => scheduleFlyout(true)}
+          onMouseLeave={() => scheduleFlyout(false)}
+        >
+          <nav className="rail-mini-list">
+            {ordered.map((group) => {
+              const items = groups.get(group) ?? []
+              if (items.length === 0) return null
+              const isUngrouped = group === UNGROUPED
+              return (
+                <div key={group} className="rail-mini-group">
+                  {hasFolders && (
+                    <div className="rail-mini-sep" title={isUngrouped ? 'Ungrouped' : group}>
+                      {isUngrouped ? '···' : group}
+                    </div>
+                  )}
+                  {items.map((conn) => {
+                    const session = sessions[conn.id]
+                    const dot = statusDot(session)
+                    return (
+                      <button
+                        key={conn.id}
+                        className={`rail-mini-item ${activeId === conn.id ? 'active' : ''}`}
+                        // The avatar carries the tag color when collapsed.
+                        style={{ background: conn.color }}
+                        title={`${conn.name}${conn.group ? ` — ${conn.group}` : ''}${
+                          session?.status === 'connected' ? ' · connected' : ''
+                        }`}
+                        onClick={() => selectCluster(conn.id)}
+                      >
+                        <span className={`rail-mini-led ${dot}`} />
+                        <span className="rail-mini-letter">
+                          {conn.name.charAt(0).toUpperCase()}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              )
+            })}
+            <button className="rail-mini-item add" title="Add cluster" onClick={() => openDialog()}>
+              <Plus size={14} />
+            </button>
+          </nav>
+          <div className="rail-flyout">{fullSidebar}</div>
+        </aside>
+      )}
 
       <ConfirmDialog
         open={confirmId !== null}
@@ -285,46 +392,15 @@ export function Sidebar(): React.JSX.Element {
       />
     </>
   )
+}
 
-  if (mini) {
-    return (
-      <aside
-        className={`rail mini ${hovered ? 'hovered' : ''}`}
-        onMouseEnter={() => setHovered(true)}
-        onMouseLeave={() => setHovered(false)}
-      >
-        <button className="rail-mini-toggle" title="Expand sidebar" onClick={toggleMini}>
-          <PanelLeftOpen size={15} />
-        </button>
-        <nav className="rail-mini-list">
-          {connections.map((conn) => {
-            const status = sessions[conn.id]?.status
-            return (
-              <button
-                key={conn.id}
-                className={`rail-mini-item ${activeId === conn.id ? 'active' : ''} ${status === 'connected' ? 'connected' : ''}`}
-                title={`${conn.name}${conn.group ? ` — ${conn.group}` : ''}${status === 'connected' ? ' (connected)' : ''}`}
-                onClick={() => selectCluster(conn.id)}
-              >
-                <span className="rail-mini-led" style={{ background: conn.color, color: conn.color }} />
-                <span className="rail-mini-letter">{conn.name.charAt(0).toUpperCase()}</span>
-              </button>
-            )
-          })}
-          <button className="rail-mini-item add" title="Add cluster" onClick={() => openDialog()}>
-            <Plus size={14} />
-          </button>
-        </nav>
-        <div className="rail-flyout">{renderFullContent()}</div>
-      </aside>
-    )
-  }
-
-  return (
-    <aside className="rail">
-      {renderFullContent()}
-    </aside>
-  )
+/** Connection indicator: cluster health while connected, pulse while
+ *  connecting, red when unreachable, dim when idle. Independent of tag color. */
+function statusDot(session: Session | undefined): string {
+  if (session?.status === 'connected') return session.overview?.health.status ?? 'green'
+  if (session?.status === 'connecting') return 'connecting'
+  if (session?.status === 'error') return 'red'
+  return 'off'
 }
 
 function ClusterItem({
@@ -363,6 +439,8 @@ function ClusterItem({
   return (
     <div
       className={`cluster-item ${active ? 'active' : ''} ${connected ? 'connected' : ''} ${indented ? 'indented' : ''} ${dragging ? 'dragging' : ''}`}
+      // Warp-style: the row itself is tinted with the tag color (see app.css).
+      style={{ ['--tag' as string]: conn.color }}
       role="button"
       tabIndex={0}
       draggable
@@ -376,7 +454,7 @@ function ClusterItem({
         }
       }}
     >
-      <span className="led" style={{ background: conn.color, color: conn.color }} />
+      <span className={`conn-dot ${statusDot(session)}`} title={connected ? 'connected' : undefined} />
       <span className="c-text">
         <span className="c-name" style={{ display: 'block' }}>
           {conn.name}

@@ -18,7 +18,7 @@
 .rail-flyout {
   position: absolute;
   top: 0;
-  left: 100%;
+  left: 0; /* cover the icon strip rather than opening beside it */
   width: 248px;
   height: 100%;
   background: var(--rail-bg);
@@ -143,8 +143,8 @@
   flex: 1;
 }
 
-/* sidebar collapse toggle + mini (icon-strip) mode */
-.rail-mini-toggle {
+/* sidebar pin toggle + mini (icon-strip) mode */
+.rail-pin {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -152,24 +152,57 @@
   opacity: 0.7;
   border-radius: var(--radius-sm);
 }
-.rail-mini-toggle:hover {
+.rail-pin:hover {
   opacity: 1;
   color: var(--rail-ink-strong);
 }
-.rail.mini .rail-mini-toggle {
-  width: 100%;
-  padding: 16px 0 12px;
+.rail-pin.on {
+  opacity: 1;
+  color: var(--accent);
 }
 
 .rail-mini-list {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  scrollbar-width: none; /* icons carry tooltips; hide the strip's scrollbar */
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 6px;
-  padding: 4px 0 10px;
+  padding: 10px 0;
+}
+
+.rail-mini-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
+
+/* Folder context survives collapse: a tiny label above each group. */
+.rail-mini-sep {
+  width: 44px;
+  margin-top: 4px;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--rail-ink);
+  opacity: 0.55;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border-top: 1px solid var(--rail-border);
+  padding-top: 5px;
+}
+.rail-mini-group:first-child .rail-mini-sep {
+  border-top: none;
+  margin-top: 0;
+  padding-top: 0;
 }
 
 .rail-mini-item {
@@ -180,34 +213,56 @@
   width: 34px;
   height: 34px;
   border-radius: 50%;
-  border: 1px solid var(--rail-border);
-  color: var(--rail-ink-strong);
+  /* background = tag color, set inline */
+  border: none;
+  color: #fff;
   font-size: 13px;
   font-weight: 600;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
 }
 .rail-mini-item:hover {
-  background: var(--rail-hover);
+  filter: brightness(1.15);
 }
 .rail-mini-item.active {
-  background: var(--rail-active);
-  border-color: var(--accent);
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 .rail-mini-item.add {
-  border-style: dashed;
+  background: transparent;
+  border: 1.5px dashed var(--rail-border);
   color: var(--rail-ink);
+  text-shadow: none;
 }
 
+/* Connection/health dot on the avatar: green/yellow/red, pulse, or dim. */
 .rail-mini-led {
   position: absolute;
-  top: 1px;
-  right: 1px;
-  width: 8px;
-  height: 8px;
+  top: -1px;
+  right: -1px;
+  width: 9px;
+  height: 9px;
   border-radius: 50%;
   border: 2px solid var(--rail-bg);
+  background: var(--rail-border);
 }
-.rail-mini-item.connected .rail-mini-led {
-  box-shadow: 0 0 5px 1px currentColor;
+.rail-mini-led.green {
+  background: var(--ok);
+  box-shadow: 0 0 5px 1px var(--ok-soft);
+}
+.rail-mini-led.yellow {
+  background: var(--warn);
+  box-shadow: 0 0 5px 1px var(--warn-soft);
+}
+.rail-mini-led.red {
+  background: var(--danger);
+  box-shadow: 0 0 5px 1px var(--danger-soft);
+}
+.rail-mini-led.connecting {
+  background: var(--warn);
+  animation: conn-pulse 1s ease-in-out infinite;
+}
+.rail-mini-led.off {
+  background: var(--rail-border);
 }
 
 .rail-label {
@@ -244,37 +299,81 @@
   overflow-y: auto;
   min-height: 0;
   padding-bottom: 8px;
+  /* slim, unobtrusive scrollbar that matches the rail */
+  scrollbar-width: thin;
+  scrollbar-color: var(--rail-border) transparent;
+}
+.rail-list::-webkit-scrollbar {
+  width: 6px;
+}
+.rail-list::-webkit-scrollbar-thumb {
+  background: var(--rail-border);
+  border-radius: 3px;
+}
+.rail-list::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .cluster-item {
+  --tag: var(--rail-border);
   display: flex;
   align-items: center;
   gap: 10px;
   width: 100%;
   text-align: left;
   padding: 8px 14px 8px 16px;
-  border-left: 2px solid transparent;
+  /* Warp-style tag tint: the row wears its tag color, quiet by default. */
+  background: color-mix(in srgb, var(--tag) 9%, transparent);
+  border-left: 2px solid color-mix(in srgb, var(--tag) 45%, transparent);
   color: var(--rail-ink);
 }
 
 .cluster-item:hover {
-  background: var(--rail-hover);
+  background: color-mix(in srgb, var(--tag) 16%, transparent);
 }
 
 .cluster-item.active {
-  background: var(--rail-active);
-  border-left-color: var(--accent);
+  background: color-mix(in srgb, var(--tag) 24%, transparent);
+  border-left-color: var(--tag);
   color: var(--rail-ink-strong);
 }
 
-.cluster-item .led {
+/* Connection status dot — independent of the tag color. */
+.conn-dot {
+  flex: none;
   width: 8px;
   height: 8px;
   border-radius: 50%;
 }
+.conn-dot.green {
+  background: var(--ok);
+  box-shadow: 0 0 6px 1px var(--ok-soft);
+}
+.conn-dot.yellow {
+  background: var(--warn);
+  box-shadow: 0 0 6px 1px var(--warn-soft);
+}
+.conn-dot.red {
+  background: var(--danger);
+  box-shadow: 0 0 6px 1px var(--danger-soft);
+}
+.conn-dot.connecting {
+  background: var(--warn);
+  animation: conn-pulse 1s ease-in-out infinite;
+}
+.conn-dot.off {
+  background: transparent;
+  border: 1.5px solid var(--rail-border);
+}
 
-.cluster-item.connected .led {
-  box-shadow: 0 0 6px 1px currentColor;
+@keyframes conn-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 
 .cluster-item .c-name {

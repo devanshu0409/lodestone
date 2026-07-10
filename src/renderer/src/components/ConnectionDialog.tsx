@@ -3,15 +3,19 @@ import * as Dialog from '@radix-ui/react-dialog'
 import type { ClusterConnection, SaveConnectionPayload, TestConnectionResult } from '@shared/types'
 import { useApp } from '../store'
 
+// Deliberately spread across the hue wheel so no two tags read as
+// "the same color at a glance" in the rail.
 const TAG_COLORS = [
-  '#6b7684', // slate
-  '#35b5a7', // teal
-  '#4c8dff', // blue
-  '#8a63d2', // violet
-  '#d99a2b', // amber
-  '#e0625c', // red
-  '#e06ba8', // pink
-  '#3cb878' // green
+  '#6b7684', // slate (neutral)
+  '#e5484d', // red
+  '#f76b15', // orange
+  '#f0b429', // yellow
+  '#46a758', // green
+  '#00b3c2', // cyan
+  '#3e7bfa', // blue
+  '#8b5cf6', // violet
+  '#d6409f', // magenta
+  '#a18072' // brown
 ]
 
 interface Draft {

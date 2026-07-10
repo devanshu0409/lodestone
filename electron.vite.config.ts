@@ -18,6 +18,8 @@ export default defineConfig({
     resolve: { alias: { '@shared': shared } },
     // Honor an externally assigned port (preview tooling); default stays 5173.
     server: { port: Number(process.env.PORT) || 5173 },
+    // Single source of truth for the version shown in the UI.
+    define: { __APP_VERSION__: JSON.stringify(process.env.npm_package_version ?? '') },
     build: {
       // Monaco's editor core is inherently large; it loads from local disk in
       // the packaged app, so the network-oriented size warning is noise here.
