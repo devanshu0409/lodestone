@@ -335,34 +335,41 @@ export function Sidebar(): React.JSX.Element {
               const items = groups.get(group) ?? []
               if (items.length === 0) return null
               const isUngrouped = group === UNGROUPED
+              const isCollapsed = collapsed.has(group)
               return (
                 <div key={group} className="rail-mini-group">
                   {hasFolders && (
-                    <div className="rail-mini-sep" title={isUngrouped ? 'Ungrouped' : group}>
+                    <button
+                      className="rail-mini-sep"
+                      title={`${isUngrouped ? 'Ungrouped' : group} · ${items.length} cluster${items.length === 1 ? '' : 's'} — click to ${isCollapsed ? 'expand' : 'collapse'}`}
+                      onClick={() => toggle(group)}
+                    >
                       {isUngrouped ? '···' : group}
-                    </div>
+                      {isCollapsed && <span className="rail-mini-sep-count">{items.length}</span>}
+                    </button>
                   )}
-                  {items.map((conn) => {
-                    const session = sessions[conn.id]
-                    const dot = statusDot(session)
-                    return (
-                      <button
-                        key={conn.id}
-                        className={`rail-mini-item ${activeId === conn.id ? 'active' : ''}`}
-                        // The avatar carries the tag color when collapsed.
-                        style={{ background: conn.color }}
-                        title={`${conn.name}${conn.group ? ` — ${conn.group}` : ''}${
-                          session?.status === 'connected' ? ' · connected' : ''
-                        }`}
-                        onClick={() => selectCluster(conn.id)}
-                      >
-                        <span className={`rail-mini-led ${dot}`} />
-                        <span className="rail-mini-letter">
-                          {conn.name.charAt(0).toUpperCase()}
-                        </span>
-                      </button>
-                    )
-                  })}
+                  {!isCollapsed &&
+                    items.map((conn) => {
+                      const session = sessions[conn.id]
+                      const dot = statusDot(session)
+                      return (
+                        <button
+                          key={conn.id}
+                          className={`rail-mini-item ${activeId === conn.id ? 'active' : ''}`}
+                          // Same muted tag tint as the expanded rows (see app.css).
+                          style={{ ['--tag' as string]: conn.color }}
+                          title={`${conn.name}${conn.group ? ` — ${conn.group}` : ''}${
+                            session?.status === 'connected' ? ' · connected' : ''
+                          }`}
+                          onClick={() => selectCluster(conn.id)}
+                        >
+                          <span className={`rail-mini-led ${dot}`} />
+                          <span className="rail-mini-letter">
+                            {conn.name.charAt(0).toUpperCase()}
+                          </span>
+                        </button>
+                      )
+                    })}
                 </div>
               )
             })}
