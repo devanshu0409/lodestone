@@ -14,9 +14,9 @@
     "typecheck": "tsc --noEmit --composite false -p tsconfig.node.json && tsc --noEmit --composite false -p tsconfig.web.json",
     "make-icons": "electron scripts/rasterize-icon.cjs",
     "pack:dir": "npm run build && electron-builder --dir",
-    "dist": "npm run build && electron-builder",
-    "dist:win": "npm run build && electron-builder --win",
-    "dist:mac": "npm run build && electron-builder --mac"
+    "dist": "npm run build && electron-builder --publish never",
+    "dist:win": "npm run build && electron-builder --win --publish never",
+    "dist:mac": "npm run build && electron-builder --mac --publish never"
   },
   "dependencies": {
     "@fontsource/ibm-plex-sans": "^5.2.8",
