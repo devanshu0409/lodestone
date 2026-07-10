@@ -4,7 +4,8 @@ import type {
   EsRequestSpec,
   EsResponse,
   IpcResult,
-  SaveConnectionPayload
+  SaveConnectionPayload,
+  UpdateStatus
 } from '@shared/types'
 import type { LodestoneApi } from '../../../preload'
 
@@ -428,6 +429,12 @@ export function installDevBridge(): void {
           return respond({ acknowledged: true, result: 'ok (mock)' })
         return respond({})
       }
+    },
+    updater: {
+      checkForUpdates: async () => ok(undefined),
+      downloadUpdate: async () => ok(undefined),
+      quitAndInstall: async () => ok(undefined),
+      onStatus: (_cb: (status: UpdateStatus) => void) => () => {}
     }
   }
 

@@ -20,6 +20,11 @@ asarUnpack:
 
 npmRebuild: false
 
+publish:
+  - provider: github
+    owner: lodestone-gui
+    repo: lodestone
+
 win:
   target:
     - target: nsis

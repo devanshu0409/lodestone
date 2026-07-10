@@ -67,6 +67,7 @@ export function Sidebar(): React.JSX.Element {
   const [dragId, setDragId] = useState<string | null>(null)
   const [dropGroup, setDropGroup] = useState<string | null>(null)
   const [confirmId, setConfirmId] = useState<string | null>(null)
+  const [hovered, setHovered] = useState(false)
 
   const toggle = (group: string): void => {
     setCollapsed((prev) => {
@@ -141,39 +142,16 @@ export function Sidebar(): React.JSX.Element {
       localStorage.setItem(MINI_KEY, m ? '0' : '1')
       return !m
     })
+    setHovered(false)
   }
 
-  if (mini) {
-    return (
-      <aside className="rail mini">
-        <button className="rail-mini-toggle" title="Expand sidebar" onClick={toggleMini}>
-          <PanelLeftOpen size={15} />
-        </button>
-        <nav className="rail-mini-list">
-          {connections.map((conn) => {
-            const status = sessions[conn.id]?.status
-            return (
-              <button
-                key={conn.id}
-                className={`rail-mini-item ${activeId === conn.id ? 'active' : ''} ${status === 'connected' ? 'connected' : ''}`}
-                title={`${conn.name}${conn.group ? ` — ${conn.group}` : ''}${status === 'connected' ? ' (connected)' : ''}`}
-                onClick={() => selectCluster(conn.id)}
-              >
-                <span className="rail-mini-led" style={{ background: conn.color, color: conn.color }} />
-                <span className="rail-mini-letter">{conn.name.charAt(0).toUpperCase()}</span>
-              </button>
-            )
-          })}
-          <button className="rail-mini-item add" title="Add cluster" onClick={() => openDialog()}>
-            <Plus size={14} />
-          </button>
-        </nav>
-      </aside>
-    )
+  const handleSelect = (id: string): void => {
+    selectCluster(id)
+    setHovered(false)
   }
 
-  return (
-    <aside className="rail">
+  const renderFullContent = (): React.JSX.Element => (
+    <>
       <div className="rail-brand">
         <span className="wordmark">LODESTONE</span>
         <span className="version">v0.2</span>
@@ -248,7 +226,7 @@ export function Sidebar(): React.JSX.Element {
                     session={sessions[conn.id]}
                     indented={showHeader}
                     dragging={dragId === conn.id}
-                    onSelect={() => selectCluster(conn.id)}
+                    onSelect={() => handleSelect(conn.id)}
                     onEdit={() => openDialog(conn.id)}
                     onClone={() => void cloneConnection(conn.id)}
                     onDelete={() => setConfirmId(conn.id)}
@@ -305,6 +283,46 @@ export function Sidebar(): React.JSX.Element {
         }}
         onClose={() => setConfirmId(null)}
       />
+    </>
+  )
+
+  if (mini) {
+    return (
+      <aside
+        className={`rail mini ${hovered ? 'hovered' : ''}`}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+      >
+        <button className="rail-mini-toggle" title="Expand sidebar" onClick={toggleMini}>
+          <PanelLeftOpen size={15} />
+        </button>
+        <nav className="rail-mini-list">
+          {connections.map((conn) => {
+            const status = sessions[conn.id]?.status
+            return (
+              <button
+                key={conn.id}
+                className={`rail-mini-item ${activeId === conn.id ? 'active' : ''} ${status === 'connected' ? 'connected' : ''}`}
+                title={`${conn.name}${conn.group ? ` — ${conn.group}` : ''}${status === 'connected' ? ' (connected)' : ''}`}
+                onClick={() => selectCluster(conn.id)}
+              >
+                <span className="rail-mini-led" style={{ background: conn.color, color: conn.color }} />
+                <span className="rail-mini-letter">{conn.name.charAt(0).toUpperCase()}</span>
+              </button>
+            )
+          })}
+          <button className="rail-mini-item add" title="Add cluster" onClick={() => openDialog()}>
+            <Plus size={14} />
+          </button>
+        </nav>
+        <div className="rail-flyout">{renderFullContent()}</div>
+      </aside>
+    )
+  }
+
+  return (
+    <aside className="rail">
+      {renderFullContent()}
     </aside>
   )
 }

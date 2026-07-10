@@ -3,6 +3,7 @@ import { useApp } from './store'
 import { Sidebar } from './components/Sidebar'
 import { ClusterView } from './components/ClusterView'
 import { ConnectionDialog } from './components/ConnectionDialog'
+import { UpdateBanner } from './components/UpdateBanner'
 import { Toasts } from './components/ui'
 
 export function App(): React.JSX.Element {
@@ -17,6 +18,7 @@ export function App(): React.JSX.Element {
     <div className="app">
       <Sidebar />
       <main className="content">
+        <UpdateBanner />
         {active ? (
           <ClusterView conn={active} />
         ) : (

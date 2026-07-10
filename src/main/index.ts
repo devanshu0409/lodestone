@@ -1,10 +1,11 @@
 import { app, BrowserWindow, nativeTheme, shell } from 'electron'
 import { join } from 'node:path'
 import { registerIpc } from './ipc'
+import { setupAutoUpdater } from './updater'
 
 const isDev = !!process.env.ELECTRON_RENDERER_URL
 
-function createWindow(): void {
+function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
     width: 1280,
     height: 820,
@@ -45,11 +46,14 @@ function createWindow(): void {
   } else {
     win.loadFile(join(__dirname, '../renderer/index.html'))
   }
+
+  return win
 }
 
 app.whenReady().then(() => {
   registerIpc()
-  createWindow()
+  const win = createWindow()
+  setupAutoUpdater(win)
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

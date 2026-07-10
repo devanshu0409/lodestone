@@ -6,7 +6,8 @@ import type {
   EsResponse,
   IpcResult,
   SaveConnectionPayload,
-  TestConnectionResult
+  TestConnectionResult,
+  UpdateStatus
 } from '@shared/types'
 
 /** Typed surface exposed to the renderer. Everything returns an IpcResult envelope. */
@@ -22,6 +23,12 @@ export interface LodestoneApi {
     disconnect(id: string): Promise<IpcResult<void>>
     request(id: string, spec: EsRequestSpec): Promise<IpcResult<EsResponse>>
   }
+  updater: {
+    checkForUpdates(): Promise<IpcResult<void>>
+    downloadUpdate(): Promise<IpcResult<void>>
+    quitAndInstall(): Promise<IpcResult<void>>
+    onStatus(cb: (status: UpdateStatus) => void): () => void
+  }
 }
 
 const api: LodestoneApi = {
@@ -35,6 +42,16 @@ const api: LodestoneApi = {
     connect: (id) => ipcRenderer.invoke('cluster:connect', id),
     disconnect: (id) => ipcRenderer.invoke('cluster:disconnect', id),
     request: (id, spec) => ipcRenderer.invoke('cluster:request', id, spec)
+  },
+  updater: {
+    checkForUpdates: () => ipcRenderer.invoke('update:check'),
+    downloadUpdate: () => ipcRenderer.invoke('update:download'),
+    quitAndInstall: () => ipcRenderer.invoke('update:install'),
+    onStatus: (cb) => {
+      const handler = (_e: unknown, status: UpdateStatus): void => cb(status)
+      ipcRenderer.on('update:status', handler)
+      return () => ipcRenderer.removeListener('update:status', handler)
+    }
   }
 }
 

@@ -110,3 +110,11 @@ export interface TestConnectionResult {
 
 /** Uniform IPC envelope so errors cross the bridge without throwing opaque objects. */
 export type IpcResult<T> = { ok: true; data: T } | { ok: false; error: string }
+
+/** Auto-updater status pushed from main → renderer via `update:status` event. */
+export type UpdateStatus =
+  | { state: 'idle' }
+  | { state: 'available'; version: string }
+  | { state: 'downloading'; percent: number }
+  | { state: 'downloaded' }
+  | { state: 'error'; message: string }
