@@ -1,0 +1,77 @@
+/*
+ * Lodestone design tokens.
+ *
+ * Direction: a precision instrument. Neutral graphite/paper chrome so the
+ * cluster health colors (green/yellow/red) stay the loudest signal on screen.
+ * One accent — petrol teal — spent only on focus, primary actions and the
+ * active context. The left rail is carbon in BOTH themes: the fixed chassis
+ * the themed content sits in.
+ */
+
+:root {
+  /* type */
+  --font-ui: 'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Cascadia Mono', Consolas, monospace;
+
+  /* light theme (default) */
+  --bg: #f4f5f6;
+  --surface: #ffffff;
+  --surface-2: #eceef0;
+  --border: #e2e5e9;
+  --border-strong: #c9ced4;
+  --ink: #171a1f;
+  --ink-2: #5a626c;
+  --ink-3: #8b939d;
+
+  --accent: #0e7a6e;
+  --accent-hover: #0a635a;
+  --accent-soft: rgba(14, 122, 110, 0.1);
+  --on-accent: #ffffff;
+
+  --ok: #1e9e63;
+  --warn: #b97a10;
+  --danger: #cc4a44;
+  --ok-soft: rgba(30, 158, 99, 0.11);
+  --warn-soft: rgba(185, 122, 16, 0.12);
+  --danger-soft: rgba(204, 74, 68, 0.1);
+
+  --focus: rgba(14, 122, 110, 0.45);
+  --shadow-dlg: 0 12px 40px rgba(12, 16, 20, 0.18);
+
+  /* carbon rail — identical in both themes */
+  --rail-bg: #14171b;
+  --rail-border: #23272d;
+  --rail-ink: #a7afb8;
+  --rail-ink-strong: #edf0f2;
+  --rail-hover: #1c2026;
+  --rail-active: #242a31;
+
+  --radius: 6px;
+  --radius-sm: 4px;
+}
+
+[data-theme='dark'] {
+  --bg: #0f1114;
+  --surface: #16181d;
+  --surface-2: #1d2126;
+  --border: #262b31;
+  --border-strong: #3a414b;
+  --ink: #e6e9ec;
+  --ink-2: #9aa3ad;
+  --ink-3: #6a727c;
+
+  --accent: #35b5a7;
+  --accent-hover: #4dc6b8;
+  --accent-soft: rgba(53, 181, 167, 0.13);
+  --on-accent: #07211e;
+
+  --ok: #3cb878;
+  --warn: #d99a2b;
+  --danger: #e0625c;
+  --ok-soft: rgba(60, 184, 120, 0.14);
+  --warn-soft: rgba(217, 154, 43, 0.14);
+  --danger-soft: rgba(224, 98, 92, 0.13);
+
+  --focus: rgba(53, 181, 167, 0.5);
+  --shadow-dlg: 0 12px 40px rgba(0, 0, 0, 0.5);
+}

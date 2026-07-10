@@ -1,0 +1,49 @@
+# Dependencies
+node_modules/
+
+# Build output
+out/
+dist/
+.vite/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE / editor
+.vscode/
+.idea/
+.claude/
+*.swp
+*.swo
+*~
+
+# Electron-builder artifacts
+release/
+*.app
+*.dmg
+*.exe
+*.AppImage
+*.snap
+*.deb
+*.rpm
+
+# TypeScript cache
+*.tsbuildinfo
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Icon rasters ARE committed (CI needs them without an Electron run);
+# regenerate from build/icon.svg with: npm run make-icons
+build/_preview-*.png
+build/_extracted-*.png

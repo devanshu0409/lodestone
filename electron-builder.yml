@@ -1,0 +1,59 @@
+appId: com.lodestone.app
+productName: Lodestone
+copyright: Copyright © 2026 Lodestone contributors
+
+directories:
+  buildResources: build
+  output: dist
+
+# electron-vite emits the compiled app into out/; ship that plus package.json.
+files:
+  - out/**/*
+  - package.json
+  - '!**/*.map'
+
+asar: true
+# The bundled fonts + Monaco are large; keep them unpacked out of the asar so
+# Monaco's web workers load reliably.
+asarUnpack:
+  - '**/*.woff2'
+
+npmRebuild: false
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: zip
+      arch: [x64]
+  # Hand-built multi-size .ico (see scripts/rasterize-icon.cjs): small sizes use
+  # a simplified mark so the taskbar/title-bar icon stays legible.
+  icon: build/icon.ico
+  artifactName: ${productName}-${version}-${arch}.${ext}
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowElevation: true
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Lodestone
+
+mac:
+  target:
+    - target: dmg
+      arch: [x64, arm64]
+    - target: zip
+      arch: [x64, arm64]
+  icon: build/icon.png
+  category: public.app-category.developer-tools
+  # Unsigned by default; set CSC_LINK / CSC_KEY_PASSWORD to sign + notarize.
+  identity: null
+
+linux:
+  target:
+    - AppImage
+  icon: build/icon.png
+  category: Development
+  maintainer: Lodestone contributors
