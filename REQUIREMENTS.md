@@ -8,18 +8,34 @@
 
 ## 1. Problem Statement
 
-`elasticsearch-head` is the most-loved lightweight ES GUI, but it is unmaintained and has
-structural limitations:
+`elasticsearch-head` is the most-loved lightweight ES GUI, but it is unmaintained, and
+day-to-day operation of real fleets exposes five structural pain areas that no browser
+extension or generic HTTP client addresses:
 
-1. **Single-node tunnel vision** — it connects to one node URL at a time; no concept of a
-   *cluster* made of multiple nodes, and no way to manage multiple clusters.
-2. **No persistent request context** — every ad-hoc request requires re-entering the URL.
-3. **Browser-extension constraints** — CORS, mixed-content, and no story for TLS with
-   self-signed certs or modern authentication.
-4. **API discoverability** — users constantly leave the tool to search Elastic docs for the
-   correct endpoint/body for operations like update-by-query, reindex, or search templates.
+1. **Browser-extension state bleed → data-corruption risk.** Extensions share one global
+   background state across tabs. Open Pod A in one tab and connect to Pod B in another,
+   and the active connection target silently moves for *every* tab — a mutation typed
+   against Pod A can fire blindly into Pod B. The tool must give each workspace an
+   explicit, isolated connection context so a request can never cross clusters silently.
+2. **High context-switching tax from manual API-spec hunting.** Generic GUIs are dumb
+   HTTP runners with no domain knowledge: every endpoint, payload shape, or parameter
+   check means leaving the tool to hunt through the Elastic docs. The API surface should
+   live *inside* the tool — searchable by intent, with pre-filled request templates.
+3. **Tedious, error-prone document mutation.** Changing one field traditionally means
+   extracting the `_id`, hand-drafting a `POST /index/_update/{id}` wrapper, and nesting
+   the `doc` object correctly — every step an opportunity for mapping breakage or a typo.
+   Editing a document should be direct: click the value, change it, confirm.
+4. **Fragmented multi-cluster / multi-node environments.** Staging nodes, production
+   pods, and infrastructure layers mean juggling config files, tearing down connections,
+   and re-authenticating — with workspace state lost at each hop. Operators need one
+   secure pane of glass over the whole fleet, with per-cluster state that persists.
+5. **Writing raw Query DSL blind.** Composing deeply nested queries in a bare text box
+   forces memorizing exactly where `match`, `term`, and `bool` belong; one misplaced
+   bracket costs a trial-and-error cycle in the middle of a live debugging session. The
+   editor must understand the DSL: context-aware completion of query types, occurrence
+   clauses, aggregations, and the target index's actual fields.
 
-This project builds a modern, open-source **Electron desktop app** that solves all four.
+This project builds a modern, open-source **Electron desktop app** that solves all five.
 
 ## 2. Goals
 

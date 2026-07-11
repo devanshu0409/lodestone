@@ -127,7 +127,8 @@ export function CodeEditor({
   onChange,
   readOnly = false,
   height = 220,
-  suggestFields
+  suggestFields,
+  language = 'json'
 }: {
   value: string
   onChange?: (value: string) => void
@@ -135,6 +136,8 @@ export function CodeEditor({
   height?: number | string
   /** When set, enables ES query-DSL + these field names as autocomplete. */
   suggestFields?: string[]
+  /** Monaco language id (default json). */
+  language?: string
 }): React.JSX.Element {
   const hostRef = useRef<HTMLDivElement>(null)
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null)
@@ -149,7 +152,7 @@ export function CodeEditor({
     const host = hostRef.current!
     const editor = monaco.editor.create(host, {
       value,
-      language: 'json',
+      language,
       readOnly,
       minimap: { enabled: false },
       fontFamily: "'JetBrains Mono', Consolas, monospace",

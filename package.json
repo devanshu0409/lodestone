@@ -3,7 +3,7 @@
   "version": "0.4.0",
   "description": "Open-source desktop GUI for Elasticsearch and OpenSearch — multi-cluster, multi-node, offline-friendly.",
   "author": "Lodestone contributors",
-  "homepage": "https://github.com/lodestone-gui/lodestone",
+  "homepage": "https://github.com/devanshu0409/lodestone",
   "main": "./out/main/index.js",
   "license": "Apache-2.0",
   "private": true,

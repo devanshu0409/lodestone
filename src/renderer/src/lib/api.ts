@@ -223,6 +223,24 @@ export async function fetchFields(id: string, index: string): Promise<MappedFiel
   return [...seen.values()].sort((a, b) => a.path.localeCompare(b.path))
 }
 
+export interface AnalyzeToken {
+  token: string
+  start_offset: number
+  end_offset: number
+  type: string
+  position: number
+}
+
+export async function analyzeText(
+  id: string,
+  index: string | undefined,
+  body: { analyzer?: string; field?: string; text: string }
+): Promise<AnalyzeToken[]> {
+  const path = index ? `/${encodeURIComponent(index)}/_analyze` : '/_analyze'
+  const res = await esJson<{ tokens: AnalyzeToken[] }>(id, { method: 'POST', path, body })
+  return res.tokens ?? []
+}
+
 /* ---------- search ---------- */
 
 export interface SearchHit {
@@ -358,6 +376,23 @@ export async function saveDocument(
     path: `/${encodeURIComponent(index)}/_doc/${encodeURIComponent(docId)}`,
     body: source
   })
+}
+
+export interface BulkResult {
+  took: number
+  errors: boolean
+  items: unknown[]
+}
+
+/** Bulk-index NDJSON documents into the given index. The body must be a raw NDJSON string. */
+export async function bulkLoad(id: string, index: string, ndjson: string): Promise<BulkResult> {
+  const res = await esRequest(id, {
+    method: 'POST',
+    path: `/${encodeURIComponent(index)}/_bulk`,
+    body: ndjson
+  })
+  if (!res.ok) throw new ApiError(`HTTP ${res.status}: bulk failed`, res.status, res.body)
+  return res.body as BulkResult
 }
 
 /** Partial update: only the given top-level fields change, the rest are untouched. */

@@ -9,23 +9,92 @@ limits.
 > with inline document editing and search, and a multi-tab REST console with context-aware
 > query-DSL autocomplete. See [REQUIREMENTS.md](REQUIREMENTS.md) for the full spec and roadmap.
 
+![Cluster overview — health, nodes, shards at a glance](docs/screens/overview.png)
+
+| Data browser — filters, table/JSON views, inline editing | REST console — intent catalog, DSL autocomplete, JSONPath response filter |
+|---|---|
+| ![Search tab with results table](docs/screens/search.png) | ![Console with catalog and response](docs/screens/console.png) |
+
+<details>
+<summary>More: shard allocation grid with <code>_allocation/explain</code></summary>
+
+![Shard allocation grid](docs/screens/shards.png)
+
+</details>
+
 ## Why another ES GUI?
 
-- **Multi-cluster, multi-node.** Register any number of clusters, each from one or more
-  seed URLs. The rest of the topology is discovered via `_nodes`, and requests fail over
-  to healthy nodes automatically.
-- **No URL re-typing, ever.** Everything is scoped to the selected cluster.
-- **Works with secured clusters.** Basic auth today (API keys and mTLS on the roadmap via
-  a pluggable auth interface), self-signed TLS supported. Being a desktop app, there is no
-  CORS wall. Passwords are stored in the OS credential vault (DPAPI / Keychain), never in
-  plaintext.
-- **Safe on production.** Destructive operations require confirmation, and any connection
-  can be flagged read-only — writes are blocked in the main process, not just hidden in
-  the UI.
-- **Light and dark themes**, minimalist instrument-panel design, fully offline-friendly.
+Born from operating real Elasticsearch fleets with the existing tools, and hitting the
+same five walls every day:
 
-Coming next (M5): hardening and an OpenSearch test matrix. Windows, macOS, and Linux
-installers are already built via CI on every `v*` tag.
+- **Browser extensions bleed state between tabs.** Head-style extensions share one
+  background connection: connect a second tab to Pod B and every other tab silently
+  retargets — a query drafted against Pod A fires into Pod B. In Lodestone every cluster
+  is an explicit, isolated connection; a request physically cannot cross clusters. Add
+  read-only mode (enforced in the main process, not just hidden in the UI) and
+  type-to-confirm destructive ops, and production stops being scary.
+- **Generic GUIs make you hunt the API docs.** Lodestone ships a searchable-by-intent
+  API catalog — type "update by query" and get the endpoint, a documented pre-filled
+  body, and a Run button. The console autocompletes paths from your live indices and
+  request bodies from the actual Query DSL.
+- **Editing one field shouldn't mean hand-writing an `_update` request.** Open any
+  search hit and edit it in place — inline in the results table or as JSON — with
+  validation and a confirm step. The `_id` plumbing and request wrapping are the tool's
+  job, not yours.
+- **Fleets are fragmented.** Register any number of clusters from one seed URL each —
+  topology is discovered via `_nodes`, requests fail over to healthy nodes, connections
+  are grouped in folders, and each workspace keeps its state (secured by the OS
+  credential vault; no CORS wall, self-signed TLS supported).
+- **Raw Query DSL is written blind.** The query editors are context-aware: they know
+  what belongs inside `query`, `bool`, and `aggs`, complete your index's real field
+  names, and insert clause templates with tab-stops — no more bracket archaeology
+  mid-incident.
+
+## How it compares
+
+The existing tools are good at what they do — several of them inspired Lodestone. Each
+pain above is solved *somewhere*; what didn't exist is one tool that covers the whole
+daily-ops loop:
+
+| | Kibana / OSD Dev Tools | Cerebro | elasticvue | dockit | **Lodestone** |
+|---|---|---|---|---|---|
+| Deployment | server per cluster | self-hosted server | browser / desktop | desktop | **desktop** |
+| Isolated multi-cluster contexts, one pane | ✗ | ✓ switching | ✓ list | partial | **✓ + folders** |
+| Node discovery & failover from one seed | n/a | ✗ | ✗ | ✗ | **✓** |
+| ES **and** OpenSearch | ✗ (split stacks) | partial | ✓ | ✓ | **✓ (adapts at connect)** |
+| Read-only guard enforced below the UI | ✗ | ✗ | ✗ | ✗ | **✓** |
+| Intent-searchable API catalog w/ templates | ✗ | ✗ | ✗ | ✗ | **✓** |
+| Context-aware Query-DSL + field autocomplete | ✓ (best-in-class) | ✗ | shallow | ✓ | **✓ + live index fields** |
+| Direct document editing (table + JSON) | read-mostly | ✗ | basic | ✗ | **✓ with confirm/validation** |
+| Shard allocation grid + `_allocation/explain` | ✗ | ✓ | partial | ✗ | **✓** |
+| Maintained | ✓ | ~2021 | ✓ | ✓ | ✓ |
+
+If you only need a console against one cluster, Kibana Dev Tools is excellent. If you
+want a lightweight all-rounder in the browser, use elasticvue. Lodestone is for people
+operating **many** secured clusters who want head's directness with production-grade
+guardrails.
+
+## Roadmap
+
+Near-term, in rough order — items that exploit having N live cluster connections in one
+app are marked ★ (they're the ones single-cluster tools structurally can't follow):
+
+- ★ **Cross-cluster operations** — reindex between registered clusters, diff
+  mappings/settings across environments, "promote index to prod".
+- ★ **Dry-run guardrails** — auto `_count` preview before update/delete-by-query:
+  *"this touches 48,211 docs in production"* before anything runs.
+- **Workspace persistence** — reopen exactly as you left it: tabs, queries, console
+  sessions per cluster.
+- **Auth breadth** — API keys and **AWS SigV4** (Amazon OpenSearch Service), mTLS.
+- **Snapshot & restore** UI, ILM/ISM policy and index-template managers.
+- **Task manager** — live `_tasks` with reindex progress and cancel.
+- **Bulk import/export** — NDJSON/CSV file → index with mapping preview; full-index
+  export via scroll.
+- **Aggregation viewer** — render terms/date-histogram results as tables and
+  sparklines without leaving the search tab.
+
+Windows, macOS, and Linux installers are already built via CI on every `v*` tag, with
+in-app auto-update.
 
 ## Features so far
 

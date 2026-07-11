@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
-import { MoreHorizontal, Plus, Search } from 'lucide-react'
+import { Copy, Database, MoreHorizontal, Plus, Search } from 'lucide-react'
 import type { ClusterConnection } from '@shared/types'
 import { useApp } from '../store'
 import {
@@ -18,7 +18,9 @@ import {
   type IndexOp
 } from '../lib/api'
 import { formatBytes, formatCompact } from '../lib/format'
+import { mappingToJavaSpring, pascalCase, type MappingRoot } from '../lib/codegen'
 import { CodeEditor } from './CodeEditor'
+import { FixtureGeneratorDialog } from './FixtureGeneratorDialog'
 import { ConfirmDialog, Menu, MenuItem, MenuSep } from './ui'
 
 export function Indices({
@@ -359,7 +361,8 @@ function IndexDetailsDialog({
   const pushToast = useApp((s) => s.pushToast)
   const [details, setDetails] = useState<IndexDetails | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [section, setSection] = useState<'settings' | 'mappings' | 'aliases'>('settings')
+  const [section, setSection] = useState<'settings' | 'mappings' | 'aliases' | 'java' | 'data'>('settings')
+  const [fixtureOpen, setFixtureOpen] = useState(false)
   const [settingsJson, setSettingsJson] = useState('')
   const [newAlias, setNewAlias] = useState('')
   const [busy, setBusy] = useState(false)
@@ -430,7 +433,7 @@ function IndexDetailsDialog({
           <Dialog.Title className="dlg-title mono">{index}</Dialog.Title>
 
           <nav className="tab-bar" style={{ padding: 0, marginBottom: 14 }}>
-            {(['settings', 'mappings', 'aliases'] as const).map((s) => (
+            {(['settings', 'mappings', 'aliases', 'java', 'data'] as const).map((s) => (
               <button key={s} className={`tab ${section === s ? 'on' : ''}`} onClick={() => setSection(s)}>
                 {s}
               </button>
@@ -462,6 +465,39 @@ function IndexDetailsDialog({
 
           {details && section === 'mappings' && (
             <CodeEditor value={JSON.stringify(details.mappings, null, 2)} readOnly height={320} />
+          )}
+
+          {details && section === 'java' && (
+            <JavaTypesView index={index} mappings={details.mappings} />
+          )}
+
+          {details && section === 'data' && (
+            <div className="dlg-form">
+              <span className="hint" style={{ fontSize: 12, color: 'var(--ink-2)' }}>
+                Generate plausible test documents from this index's mapping and bulk-load them.
+                Useful for populating a dev cluster without touching shared staging data.
+              </span>
+              <div className="fixture-tab-info">
+                <div className="fixture-tab-row">
+                  <span>Fields detected:</span>
+                  <span className="mono">{Object.keys(((details.mappings as MappingRoot)?.properties) ?? {}).length}</span>
+                </div>
+                <div className="fixture-tab-row">
+                  <span>Current docs:</span>
+                  <span className="mono">—</span>
+                </div>
+              </div>
+              <div className="dlg-foot">
+                <div className="spacer" />
+                <button
+                  className="btn primary"
+                  onClick={() => setFixtureOpen(true)}
+                  disabled={!((details.mappings as MappingRoot)?.properties)}
+                >
+                  <Database size={13} /> Generate & load fixtures…
+                </button>
+              </div>
+            </div>
           )}
 
           {details && section === 'aliases' && (
@@ -504,8 +540,57 @@ function IndexDetailsDialog({
               Close
             </button>
           </div>
+
+          {fixtureOpen && (
+            <FixtureGeneratorDialog
+              conn={conn}
+              index={index}
+              mappings={details?.mappings}
+              open={fixtureOpen}
+              onClose={() => setFixtureOpen(false)}
+              onLoaded={() => onChanged()}
+            />
+          )}
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
+  )
+}
+
+/* ---------- generated Java / Spring Data entity ---------- */
+
+function JavaTypesView({
+  index,
+  mappings
+}: {
+  index: string
+  mappings: unknown
+}): React.JSX.Element {
+  const pushToast = useApp((s) => s.pushToast)
+  const code = useMemo(
+    () => mappingToJavaSpring(index, (mappings ?? {}) as MappingRoot),
+    [index, mappings]
+  )
+  return (
+    <div className="dlg-form">
+      <span className="hint" style={{ fontSize: 11, color: 'var(--ink-3)' }}>
+        Spring Data Elasticsearch entity generated from the live mapping — paste it into your
+        project as <span className="mono">{pascalCase(index)}.java</span>. TypeScript and Python
+        are on the roadmap.
+      </span>
+      <CodeEditor value={code} readOnly language="java" height={320} />
+      <div className="dlg-foot">
+        <div className="spacer" />
+        <button
+          className="btn primary"
+          onClick={() => {
+            navigator.clipboard.writeText(code)
+            pushToast('ok', `Copied ${pascalCase(index)}.java`)
+          }}
+        >
+          <Copy size={13} /> Copy class
+        </button>
+      </div>
+    </div>
   )
 }

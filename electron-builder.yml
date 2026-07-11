@@ -22,7 +22,7 @@ npmRebuild: false
 
 publish:
   - provider: github
-    owner: lodestone-gui
+    owner: devanshu0409
     repo: lodestone
 
 win:

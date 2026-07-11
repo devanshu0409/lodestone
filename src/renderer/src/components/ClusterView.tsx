@@ -8,15 +8,17 @@ import { ShardGrid } from './ShardGrid'
 import { Indices } from './Indices'
 import { SearchWorkspace } from './SearchWorkspace'
 import { Console } from './Console'
+import { AnalyzerPlayground } from './AnalyzerPlayground'
 
-type Tab = 'overview' | 'shards' | 'indices' | 'search' | 'console'
+type Tab = 'overview' | 'shards' | 'indices' | 'search' | 'console' | 'analyze'
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'overview', label: 'Overview' },
   { id: 'shards', label: 'Shards' },
   { id: 'indices', label: 'Indices' },
   { id: 'search', label: 'Search' },
-  { id: 'console', label: 'Console' }
+  { id: 'console', label: 'Console' },
+  { id: 'analyze', label: 'Analyze' }
 ]
 
 export function ClusterView({ conn }: { conn: ClusterConnection }): React.JSX.Element {
@@ -162,6 +164,11 @@ export function ClusterView({ conn }: { conn: ClusterConnection }): React.JSX.El
       {visited.has('console') && (
         <TabPanel active={tab === 'console'}>
           <Console conn={conn} overview={session.overview} />
+        </TabPanel>
+      )}
+      {visited.has('analyze') && (
+        <TabPanel active={tab === 'analyze'}>
+          <AnalyzerPlayground conn={conn} />
         </TabPanel>
       )}
     </>

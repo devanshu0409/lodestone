@@ -14,9 +14,18 @@ import {
   type HistoryEntry,
   type SavedRequest
 } from '../lib/consoleStore'
+import {
+  requestToJavaRestClient,
+  requestToSpringDataSearch,
+  requestToJavaApiClient
+} from '../lib/codegen'
 import { CodeEditor } from './CodeEditor'
 import { JsonView } from './JsonView'
+import { ProfileTree } from './ProfileTree'
+import { SearchResults } from './SearchResults'
+import { ExplainTree } from './ExplainTree'
 import { TabStrip } from './TabStrip'
+import { Menu, MenuItem } from './ui'
 
 const METHODS: HttpMethod[] = ['GET', 'POST', 'PUT', 'DELETE', 'HEAD']
 
@@ -61,6 +70,32 @@ export function Console({
 }): React.JSX.Element {
   const pushToast = useApp((s) => s.pushToast)
   const distribution = overview.info.distribution
+
+  const [splitPct, setSplitPct] = useState(50)
+  const splitRef = useRef<HTMLDivElement>(null)
+  const draggingRef = useRef(false)
+
+  const onDividerMouseDown = (e: React.MouseEvent): void => {
+    e.preventDefault()
+    draggingRef.current = true
+    const onMove = (ev: MouseEvent): void => {
+      if (!draggingRef.current || !splitRef.current) return
+      const rect = splitRef.current.getBoundingClientRect()
+      const pct = ((ev.clientY - rect.top) / rect.height) * 100
+      setSplitPct(Math.min(90, Math.max(10, pct)))
+    }
+    const onUp = (): void => {
+      draggingRef.current = false
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+    document.body.style.cursor = 'row-resize'
+    document.body.style.userSelect = 'none'
+  }
 
   const [panel, setPanel] = useState<Panel>('catalog')
   const [catalogQuery, setCatalogQuery] = useState('')
@@ -178,6 +213,49 @@ export function Console({
     navigator.clipboard.writeText(parts.join(' \\\n  '))
     pushToast('ok', 'Copied as cURL')
   }
+
+  const copyText = (text: string, what: string): void => {
+    navigator.clipboard.writeText(text)
+    pushToast('ok', `Copied as ${what}`)
+  }
+
+  const copyJava = (): void =>
+    copyText(requestToJavaRestClient(active.method, active.path, active.body), 'Java (RestClient)')
+
+  const copySpring = (): void => {
+    const snippet = requestToSpringDataSearch(active.path, active.body)
+    if (snippet) copyText(snippet, 'Java (Spring Data)')
+    else pushToast('err', 'Spring Data snippet is only available for _search requests.')
+  }
+
+  const copyJavaApi = (): void => {
+    const snippet = requestToJavaApiClient(active.path, active.body)
+    if (snippet) copyText(snippet, 'Java (API Client)')
+    else pushToast('err', 'Java API Client snippet is only available for _search requests.')
+  }
+
+  const isSearch = /_search/.test(active.path)
+
+  type ViewMode = 'json' | 'profile' | 'hits' | 'explain'
+  const [viewMode, setViewMode] = useState<ViewMode>('json')
+
+  // Auto-switch view mode based on response content
+  const resBody = active.result?.response?.body as Record<string, unknown> | undefined
+  const hasProfile = !!(resBody && typeof resBody === 'object' && 'profile' in resBody)
+  const hasHits = !!(resBody && typeof resBody === 'object' && 'hits' in resBody && Array.isArray((resBody as { hits?: { hits?: unknown[] } }).hits?.hits))
+  const hasExplained = !!(resBody && typeof resBody === 'object' && 'explained' in resBody)
+
+  const availableModes: ViewMode[] = ['json']
+  if (hasProfile) availableModes.push('profile')
+  if (hasHits) availableModes.push('hits')
+  if (hasExplained) availableModes.push('explain')
+
+  // Reset to json if current mode isn't available
+  useEffect(() => {
+    if (!availableModes.includes(viewMode)) setViewMode('json')
+  }, [availableModes.join(','), viewMode])
+
+  const activeIndex = indexFromPath(active.path)
 
   const save = (): void => {
     const name = window.prompt('Save this request as:', `${active.method} ${active.path}`)
@@ -342,9 +420,18 @@ export function Console({
             indexNames={indexNames}
             onEnter={() => void run()}
           />
-          <button className="btn" title="Copy as cURL" onClick={copyCurl}>
-            <Copy size={13} />
-          </button>
+          <Menu
+            trigger={
+              <button className="btn" title="Copy as…">
+                <Copy size={13} />
+              </button>
+            }
+          >
+            <MenuItem onSelect={copyCurl}>Copy as cURL</MenuItem>
+            <MenuItem onSelect={copyJava}>Copy as Java — RestClient</MenuItem>
+            {isSearch && <MenuItem onSelect={copySpring}>Copy as Java — Spring Data</MenuItem>}
+            {isSearch && <MenuItem onSelect={copyJavaApi}>Copy as Java — API Client</MenuItem>}
+          </Menu>
           <button className="btn" title="Save request" onClick={save}>
             <Save size={13} />
           </button>
@@ -354,8 +441,8 @@ export function Console({
           </button>
         </div>
 
-        <div className="console-split">
-          <div className="req-body">
+        <div className="console-split" ref={splitRef}>
+          <div className="req-body" style={{ flexBasis: `${splitPct}%` }}>
             <div className="pane-label">
               Request body
               {pathIndex && bodyFields.length > 0 && (
@@ -371,7 +458,8 @@ export function Console({
               suggestFields={bodyFields}
             />
           </div>
-          <div className="res-pane">
+          <div className="console-divider" onMouseDown={onDividerMouseDown} />
+          <div className="res-pane" style={{ flexBasis: `${100 - splitPct}%` }}>
             <div className="pane-label">
               Response
               {active.result?.response && (
@@ -389,7 +477,34 @@ export function Console({
             {active.result?.error ? (
               <div className="res-error">{active.result.error}</div>
             ) : active.result?.response ? (
-              <JsonView value={active.result.response.body} />
+              <>
+                {availableModes.length > 1 && (
+                  <div className="view-mode-bar">
+                    {availableModes.map((mode) => (
+                      <button
+                        key={mode}
+                        className={`view-mode-btn ${viewMode === mode ? 'on' : ''}`}
+                        onClick={() => setViewMode(mode)}
+                      >
+                        {mode === 'json' ? 'JSON' :
+                         mode === 'profile' ? 'Profile' :
+                         mode === 'hits' ? 'Hits' : 'Explain'}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {viewMode === 'json' && <JsonView value={active.result.response.body} />}
+                {viewMode === 'profile' && <ProfileTree body={active.result.response.body} />}
+                {viewMode === 'hits' && (
+                  <SearchResults
+                    body={active.result.response.body}
+                    conn={conn}
+                    indexName={activeIndex}
+                    queryBody={active.body}
+                  />
+                )}
+                {viewMode === 'explain' && <ExplainTree body={active.result.response.body} />}
+              </>
             ) : (
               <div className="res-empty">
                 Pick an API from the catalog or type a request, then Run.

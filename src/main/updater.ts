@@ -36,8 +36,17 @@ export function setupAutoUpdater(win: BrowserWindow): void {
       send({ state: 'error', message: err.message })
     })
 
-    // Auto-check shortly after launch so it doesn't block window creation.
-    setTimeout(() => void autoUpdater.checkForUpdates(), 3000)
+    // Auto-check shortly after launch so it doesn't block window creation,
+    // then re-check periodically — long-running windows still learn about
+    // releases published after they started.
+    const check = (): void => {
+      void autoUpdater.checkForUpdates().catch(() => {
+        /* offline or rate-limited — the next interval will retry */
+      })
+    }
+    setTimeout(check, 3000)
+    const interval = setInterval(check, 4 * 60 * 60 * 1000)
+    win.on('closed', () => clearInterval(interval))
   }
 
   // Always register handlers so the renderer's typed API is satisfied.
