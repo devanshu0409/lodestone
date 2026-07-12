@@ -1,7 +1,7 @@
 # Elasticsearch Desktop GUI — Requirements Specification
 
 **Status:** Living document — tracks the design rationale and roadmap
-**Date:** 2026-07-09
+**Date:** 2026-07-11
 **License:** Apache 2.0 (open source)
 
 ---
@@ -49,6 +49,10 @@ This project builds a modern, open-source **Electron desktop app** that solves a
 - Modern equivalents of the elasticsearch-head essentials: cluster overview, shard grid,
   data browser, index management.
 - Safe by default: destructive-operation confirmations and per-cluster read-only mode.
+- **Developer workbench**: shorten the query-build-tune-integrate loop for app developers —
+  entity classes generated from mappings (Java/Spring first), copy-request-as-client-code,
+  an analyzer playground for token-level match debugging, `_explain`/`profile` visualizers,
+  and seeded fixture-data generation for dev indices.
 
 ## 3. Non-Goals (v1)
 
@@ -192,16 +196,28 @@ This project builds a modern, open-source **Electron desktop app** that solves a
 3. **M3 — Data & indices:** data browser, filter builder, index management. *(FR-4, FR-5)*
 4. **M4 — Differentiator:** API catalog + console with spec-driven autocomplete,
    history, saved requests. *(FR-6)*
-5. **M5 — Hardening & release:** guardrails polish, OpenSearch matrix testing,
-   packaging/signing, docs, v1.0 on GitHub. *(FR-7, NFRs)*
+5. **M5 — Hardening & release:** guardrails polish, packaging via CI (Windows/macOS/
+   Linux), in-app auto-update from GitHub releases, docs, published on GitHub. *(FR-7, NFRs)*
+6. **M6 — Developer workbench:** Java/Spring entity generation from mappings,
+   copy-as-client-code (cURL + three Java flavors), analyzer playground tab,
+   `_explain` scoring trees per search hit, `profile` execution-tree visualization,
+   fixture data generator with bulk load. *(Goals §2, developer workbench)*
+
+All six milestones are implemented; OpenSearch matrix testing against live 1.x/2.x
+clusters remains open before calling it v1.0.
 
 ## 9. Backlog (post-v1 candidates)
 
-- API key / mTLS / Cloud ID auth providers; SSO
-- Linux packaging (AppImage/deb)
-- Snapshot & restore management UI
+- API key / mTLS / Cloud ID / AWS SigV4 auth providers; SSO
+- Snapshot & restore management UI; ILM/ISM + index-template managers
+- Cross-cluster operations: reindex between registered clusters, mapping/settings diff
+- Dry-run guardrails: `_count` preview before update/delete-by-query
+- Workspace persistence (reopen tabs/queries/console sessions as left)
+- Task manager (`_tasks` with progress + cancel)
+- Bulk import/export (NDJSON/CSV file → index; full-index export via scroll)
+- Aggregation result viewer (tables + sparklines)
+- TypeScript / Python generators for entity types and client-code copy
 - Multi-cluster side-by-side comparison view
 - cat-API quick views (`_cat/*` as sortable tables)
 - Ingest pipeline tester (`_ingest/pipeline/_simulate`)
-- Query profiler visualization (`"profile": true`)
 - i18n

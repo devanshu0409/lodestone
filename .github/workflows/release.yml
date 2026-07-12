@@ -5,6 +5,11 @@ on:
   push:
     tags: ['v*']
 
+# The release step creates a GitHub Release on tag pushes; the default
+# workflow token is read-only, so grant it write on repo contents.
+permissions:
+  contents: write
+
 jobs:
   build:
     strategy:

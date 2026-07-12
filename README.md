@@ -4,10 +4,12 @@ An open-source desktop GUI for **Elasticsearch** (7.x / 8.x) and **OpenSearch** 
 built with Electron. A modern successor to the spirit of `elasticsearch-head` — without its
 limits.
 
-> Status: **early development (through M4)** — multi-cluster management with node discovery
-> and failover, cluster overview, shard allocation grid, index management, a data browser
-> with inline document editing and search, and a multi-tab REST console with context-aware
-> query-DSL autocomplete. See [REQUIREMENTS.md](REQUIREMENTS.md) for the full spec and roadmap.
+> Status: **beta** — multi-cluster management with node discovery and failover, cluster
+> overview, shard allocation grid, index management, a data browser with inline document
+> editing, a multi-tab REST console with context-aware query-DSL autocomplete, an analyzer
+> playground, relevance debugging (`_explain` / profile trees), fixture data generation,
+> Java code generation, and cross-platform installers with in-app auto-update. See
+> [REQUIREMENTS.md](REQUIREMENTS.md) for the full spec and roadmap.
 
 ![Cluster overview — health, nodes, shards at a glance](docs/screens/overview.png)
 
@@ -67,6 +69,11 @@ daily-ops loop:
 | Context-aware Query-DSL + field autocomplete | ✓ (best-in-class) | ✗ | shallow | ✓ | **✓ + live index fields** |
 | Direct document editing (table + JSON) | read-mostly | ✗ | basic | ✗ | **✓ with confirm/validation** |
 | Shard allocation grid + `_allocation/explain` | ✗ | ✓ | partial | ✗ | **✓** |
+| Entity classes generated from mappings | ✗ | ✗ | ✗ | ✗ | **✓ Java/Spring** |
+| Copy request as client code | cURL only | ✗ | ✗ | ✗ | **✓ cURL + 3 Java flavors** |
+| Analyzer playground (token comparison) | ✗ | ✗ | ✗ | ✗ | **✓ side-by-side** |
+| Relevance debugging (explain / profile trees) | profiler only | ✗ | ✗ | ✗ | **✓ both, per-hit** |
+| Fixture data generator | ✗ | ✗ | ✗ | ✗ | **✓** |
 | Maintained | ✓ | ~2021 | ✓ | ✓ | ✓ |
 
 If you only need a console against one cluster, Kibana Dev Tools is excellent. If you
@@ -116,6 +123,20 @@ in-app auto-update.
   "reindex") and get a documented, pre-filled template. Path autocomplete from the
   catalog and live index names, field-aware body autocomplete, request history and
   saved requests (per cluster), a response pane with status/timing, and copy-as-cURL.
+- **Analyze** — a side-by-side analyzer playground: run any analyzer or mapped field
+  against sample text and compare the two token streams (offsets, positions) — the
+  fastest answer to "why doesn't this match?".
+- **Relevance & performance debugging** — one-click `_explain` for any search hit
+  rendered as a readable scoring tree; the console response pane renders
+  `"profile": true` output as a query-execution tree with timings.
+- **Code generation** — generate a Spring Data Elasticsearch entity (`@Document`
+  POJO with typed `@Field`s and nested classes) from any index mapping; copy any
+  console request as cURL or Java (low-level RestClient, Spring Data `StringQuery`,
+  official API client). TypeScript and Python generators are on the roadmap.
+- **Fixtures** — generate plausible, seeded test documents inferred from a mapping's
+  field types and names, and bulk-load them into a dev index — no more testing
+  against shared staging.
+- **Auto-update** — installed apps check GitHub releases and update in place.
 - **Themes** — light, dark, and follow-system theme switching from the sidebar.
 - **Guardrails** — per-cluster read-only mode enforced in the main process; destructive
   actions require confirmation.
