@@ -214,6 +214,98 @@ interface MockAggSpec {
   aggs?: Record<string, MockAggSpec>
 }
 
+/* ---------- query evaluation (the shapes our filter builder emits) ---------- */
+
+type MockQuery = Record<string, unknown>
+
+const asArray = (v: unknown): MockQuery[] =>
+  v === undefined ? [] : Array.isArray(v) ? (v as MockQuery[]) : [v as MockQuery]
+
+/** First [field, spec] pair of a leaf clause like { term: { level: "error" } }. */
+function leaf(q: MockQuery, kind: string): [string, unknown] | null {
+  const body = q[kind]
+  if (!body || typeof body !== 'object') return null
+  const entries = Object.entries(body as Record<string, unknown>)
+  return entries.length ? [entries[0][0], entries[0][1]] : null
+}
+
+function cmp(field: unknown, bound: unknown): number | null {
+  const fs = String(field)
+  const bs = String(bound)
+  const fDate = Date.parse(fs)
+  const bDate = Date.parse(bs)
+  if (Number.isFinite(fDate) && Number.isFinite(bDate) && /[-:TZ]/.test(fs)) return fDate - bDate
+  const fn = Number(field)
+  const bn = Number(bound)
+  if (Number.isFinite(fn) && Number.isFinite(bn)) return fn - bn
+  return fs < bs ? -1 : fs > bs ? 1 : 0
+}
+
+function mockMatches(source: Record<string, unknown>, q: MockQuery | undefined): boolean {
+  if (!q || 'match_all' in q) return true
+  if ('bool' in q) {
+    const b = q.bool as Record<string, unknown>
+    for (const c of asArray(b.filter)) if (!mockMatches(source, c)) return false
+    for (const c of asArray(b.must)) if (!mockMatches(source, c)) return false
+    for (const c of asArray(b.must_not)) if (mockMatches(source, c)) return false
+    const should = asArray(b.should)
+    if (should.length > 0) {
+      const hasOthers =
+        asArray(b.filter).length > 0 || asArray(b.must).length > 0 || asArray(b.must_not).length > 0
+      const min = typeof b.minimum_should_match === 'number' ? b.minimum_should_match : hasOthers ? 0 : 1
+      if (min > 0 && !should.some((c) => mockMatches(source, c))) return false
+    }
+    return true
+  }
+  let l: [string, unknown] | null
+  if ((l = leaf(q, 'term'))) {
+    const want = typeof l[1] === 'object' && l[1] !== null ? (l[1] as { value?: unknown }).value : l[1]
+    return String(mockFieldValue(source, l[0])) === String(want)
+  }
+  if ((l = leaf(q, 'match')) || (l = leaf(q, 'match_phrase'))) {
+    const want = typeof l[1] === 'object' && l[1] !== null ? (l[1] as { query?: unknown }).query : l[1]
+    return String(mockFieldValue(source, l[0]) ?? '').toLowerCase().includes(String(want).toLowerCase())
+  }
+  if ((l = leaf(q, 'wildcard'))) {
+    const pat = typeof l[1] === 'object' && l[1] !== null ? (l[1] as { value?: unknown }).value : l[1]
+    const re = new RegExp(`^${String(pat).replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')}$`, 'i')
+    return re.test(String(mockFieldValue(source, l[0]) ?? ''))
+  }
+  if ((l = leaf(q, 'prefix'))) {
+    const want = typeof l[1] === 'object' && l[1] !== null ? (l[1] as { value?: unknown }).value : l[1]
+    return String(mockFieldValue(source, l[0]) ?? '').toLowerCase().startsWith(String(want).toLowerCase())
+  }
+  if ((l = leaf(q, 'fuzzy'))) {
+    const want = typeof l[1] === 'object' && l[1] !== null ? (l[1] as { value?: unknown }).value : l[1]
+    const have = String(mockFieldValue(source, l[0]) ?? '').toLowerCase()
+    const w = String(want).toLowerCase()
+    return have === w || have.startsWith(w.slice(0, Math.max(1, w.length - 1)))
+  }
+  if ((l = leaf(q, 'regexp'))) {
+    const pat = typeof l[1] === 'object' && l[1] !== null ? (l[1] as { value?: unknown }).value : l[1]
+    try {
+      return new RegExp(`^${String(pat)}$`).test(String(mockFieldValue(source, l[0]) ?? ''))
+    } catch {
+      return false
+    }
+  }
+  if ((l = leaf(q, 'range'))) {
+    const v = mockFieldValue(source, l[0])
+    if (v === undefined) return false
+    const r = l[1] as { gt?: unknown; gte?: unknown; lt?: unknown; lte?: unknown }
+    if (r.gt !== undefined && (cmp(v, r.gt) ?? -1) <= 0) return false
+    if (r.gte !== undefined && (cmp(v, r.gte) ?? -1) < 0) return false
+    if (r.lt !== undefined && (cmp(v, r.lt) ?? 1) >= 0) return false
+    if (r.lte !== undefined && (cmp(v, r.lte) ?? 1) > 0) return false
+    return true
+  }
+  if ('exists' in q) {
+    const field = (q.exists as { field?: string }).field ?? ''
+    return mockFieldValue(source, field) !== undefined
+  }
+  return true // unknown clause — don't filter on it
+}
+
 const CAL_MS: Record<string, number> = {
   minute: 60_000,
   hour: 3_600_000,
@@ -339,22 +431,25 @@ function mockSearch(
   index: string,
   from: number,
   size: number,
-  aggs?: Record<string, MockAggSpec>
+  aggs?: Record<string, MockAggSpec>,
+  query?: MockQuery
 ): unknown {
-  const total = MOCK_TOTAL
-  const count = Math.max(0, Math.min(size, total - from))
-  const hits = Array.from({ length: count }, (_, i) => {
-    const n = from + i
-    return { _index: index, _id: `doc-${String(n).padStart(6, '0')}`, _source: mockSource(n) }
-  })
+  // Materialize + filter the whole corpus so totals, hits and aggregations all
+  // reflect the query — the mock behaves like a real cluster would.
+  const all = Array.from({ length: MOCK_TOTAL }, (_, n) => ({ n, source: mockSource(n) }))
+  const matched = query ? all.filter((d) => mockMatches(d.source, query)) : all
+  const hits = matched.slice(from, from + size).map((d) => ({
+    _index: index,
+    _id: `doc-${String(d.n).padStart(6, '0')}`,
+    _source: d.source
+  }))
   let aggregations: Record<string, unknown> | undefined
   if (aggs && Object.keys(aggs).length > 0) {
-    const all = Array.from({ length: total }, (_, n) => mockSource(n))
-    aggregations = mockAggregations(aggs, all)
+    aggregations = mockAggregations(aggs, matched.map((d) => d.source))
   }
   return {
     took: 4,
-    hits: { total: { value: total, relation: 'eq' }, hits },
+    hits: { total: { value: matched.length, relation: 'eq' }, hits },
     ...(aggregations ? { aggregations } : {})
   }
 }
@@ -587,11 +682,18 @@ export function installDevBridge(): void {
           const body = (spec.body ?? {}) as {
             from?: number
             size?: number
+            query?: MockQuery
             aggs?: Record<string, MockAggSpec>
             aggregations?: Record<string, MockAggSpec>
           }
           return respond(
-            mockSearch(target, body.from ?? 0, body.size ?? 25, body.aggs ?? body.aggregations)
+            mockSearch(
+              target,
+              body.from ?? 0,
+              body.size ?? 25,
+              body.aggs ?? body.aggregations,
+              body.query
+            )
           )
         }
         // Mutations (ops, create/delete index, doc save/delete) — acknowledge.
