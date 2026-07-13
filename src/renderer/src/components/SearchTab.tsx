@@ -6,9 +6,7 @@ import {
   ChevronRight,
   Download,
   Maximize2,
-  Play,
-  Plus,
-  X
+  Play
 } from 'lucide-react'
 import type { ClusterConnection } from '@shared/types'
 import { useApp } from '../store'
@@ -23,69 +21,12 @@ import {
   type SearchResult
 } from '../lib/api'
 import { formatCompact } from '../lib/format'
+import { buildQuery, coerce, newRow, type FilterRow } from '../lib/filterQuery'
 import { CodeEditor } from './CodeEditor'
+import { FilterRows } from './FilterRows'
 import { JsonView } from './JsonView'
 import { Menu, MenuItem } from './ui'
 import { DocDrawer } from './DocDrawer'
-
-/* ---------- filter model ---------- */
-
-type Op =
-  | '='
-  | '≠'
-  | 'contains'
-  | 'term'
-  | 'wildcard'
-  | 'prefix'
-  | 'fuzzy'
-  | 'regexp'
-  | '>'
-  | '≥'
-  | '<'
-  | '≤'
-  | 'exists'
-  | 'not exists'
-
-const OPS: Op[] = [
-  '=',
-  '≠',
-  'contains',
-  'term',
-  'wildcard',
-  'prefix',
-  'fuzzy',
-  'regexp',
-  '>',
-  '≥',
-  '<',
-  '≤',
-  'exists',
-  'not exists'
-]
-const VALUELESS: Set<Op> = new Set(['exists', 'not exists'])
-
-/** How a row joins the previous one. OR binds tighter than AND (grouped runs). */
-type Conj = 'AND' | 'OR'
-
-interface FilterRow {
-  id: number
-  field: string
-  op: Op
-  value: string
-  conj: Conj
-}
-
-let rowSeq = 0
-const newRow = (): FilterRow => ({ id: ++rowSeq, field: '', op: '=', value: '', conj: 'AND' })
-
-function coerce(value: string, type: string | undefined): unknown {
-  if (type && ['long', 'integer', 'short', 'byte', 'double', 'float', 'half_float', 'scaled_float', 'unsigned_long'].includes(type)) {
-    const n = Number(value)
-    if (Number.isFinite(n)) return n
-  }
-  if (type === 'boolean') return value === 'true'
-  return value
-}
 
 /* ---------- inline editing ---------- */
 
@@ -119,66 +60,6 @@ function isEditableCell(field: string, value: unknown, fields: Map<string, Mappe
 function toEditString(value: unknown): string {
   if (value === null || value === undefined) return ''
   return typeof value === 'object' ? JSON.stringify(value) : String(value)
-}
-
-/** A single row → one positive ES query clause (negatives are wrapped in must_not). */
-function rowClause(row: FilterRow, fields: Map<string, MappedField>): unknown | null {
-  if (!row.field) return null
-  const meta = fields.get(row.field)
-  const isText = meta?.type === 'text'
-  const exact = isText && meta?.sortPath ? meta.sortPath : row.field
-  const value = coerce(row.value, meta?.type)
-  const eq = isText && !meta?.sortPath ? { match_phrase: { [row.field]: row.value } } : { term: { [exact]: value } }
-  switch (row.op) {
-    case '=':
-      return eq
-    case '≠':
-      return { bool: { must_not: [eq] } }
-    case 'contains':
-      return isText ? { match: { [row.field]: row.value } } : { wildcard: { [row.field]: `*${row.value}*` } }
-    case 'term':
-      return { term: { [exact]: value } }
-    case 'wildcard':
-      return { wildcard: { [row.field]: row.value } }
-    case 'prefix':
-      return { prefix: { [row.field]: row.value } }
-    case 'fuzzy':
-      return { fuzzy: { [row.field]: { value: row.value, fuzziness: 'AUTO' } } }
-    case 'regexp':
-      return { regexp: { [row.field]: row.value } }
-    case '>':
-    case '≥':
-    case '<':
-    case '≤': {
-      const key = row.op === '>' ? 'gt' : row.op === '≥' ? 'gte' : row.op === '<' ? 'lt' : 'lte'
-      return { range: { [row.field]: { [key]: value } } }
-    }
-    case 'exists':
-      return { exists: { field: row.field } }
-    case 'not exists':
-      return { bool: { must_not: [{ exists: { field: row.field } }] } }
-  }
-}
-
-function buildQuery(rows: FilterRow[], fields: Map<string, MappedField>): unknown {
-  const clauses = rows
-    .map((r) => ({ clause: rowClause(r, fields), conj: r.conj }))
-    .filter((c): c is { clause: unknown; conj: Conj } => c.clause !== null)
-  if (clauses.length === 0) return { match_all: {} }
-
-  // Group into OR-runs: an AND boundary starts a new group; OR appends to the
-  // current group. Each multi-clause group becomes a should (minimum_should_match:1),
-  // and the groups are ANDed together in a filter context.
-  const groups: unknown[][] = []
-  clauses.forEach((c, i) => {
-    if (i === 0 || c.conj === 'AND') groups.push([c.clause])
-    else groups[groups.length - 1].push(c.clause)
-  })
-  const combined = groups.map((g) =>
-    g.length === 1 ? g[0] : { bool: { should: g, minimum_should_match: 1 } }
-  )
-  if (combined.length === 1) return combined[0]
-  return { bool: { filter: combined } }
 }
 
 /* ---------- component ---------- */
@@ -457,72 +338,7 @@ export function SearchTab({
         </div>
 
         {!rawMode && (
-          <div className="filter-rows">
-            {rows.map((row, i) => (
-              <div key={row.id} className="filter-row">
-                {i === 0 ? (
-                  <span className="conj-lead mono">where</span>
-                ) : (
-                  <select
-                    className="input mono conj-select"
-                    value={row.conj}
-                    onChange={(e) =>
-                      setRows((rs) => rs.map((r) => (r.id === row.id ? { ...r, conj: e.target.value as Conj } : r)))
-                    }
-                  >
-                    <option value="AND">AND</option>
-                    <option value="OR">OR</option>
-                  </select>
-                )}
-                <select
-                  className="input mono"
-                  style={{ flex: 2 }}
-                  value={row.field}
-                  onChange={(e) => setRows((rs) => rs.map((r) => (r.id === row.id ? { ...r, field: e.target.value } : r)))}
-                >
-                  <option value="">— field —</option>
-                  {fields.map((f) => (
-                    <option key={f.path} value={f.path}>
-                      {f.path} ({f.type})
-                    </option>
-                  ))}
-                </select>
-                <select
-                  className="input mono"
-                  style={{ width: 110 }}
-                  value={row.op}
-                  onChange={(e) => setRows((rs) => rs.map((r) => (r.id === row.id ? { ...r, op: e.target.value as Op } : r)))}
-                >
-                  {OPS.map((o) => (
-                    <option key={o} value={o}>
-                      {o}
-                    </option>
-                  ))}
-                </select>
-                {!VALUELESS.has(row.op) && (
-                  <input
-                    className="input mono"
-                    style={{ flex: 3 }}
-                    placeholder="value"
-                    value={row.value}
-                    onChange={(e) => setRows((rs) => rs.map((r) => (r.id === row.id ? { ...r, value: e.target.value } : r)))}
-                    onKeyDown={(e) => e.key === 'Enter' && void search(0)}
-                  />
-                )}
-                <button
-                  className="icon-btn"
-                  title="Remove filter"
-                  onClick={() => setRows((rs) => (rs.length > 1 ? rs.filter((r) => r.id !== row.id) : [newRow()]))}
-                >
-                  <X size={13} />
-                </button>
-              </div>
-            ))}
-            <button className="btn ghost" style={{ alignSelf: 'flex-start' }} onClick={() => setRows((rs) => [...rs, newRow()])}>
-              <Plus size={12} />
-              Add filter
-            </button>
-          </div>
+          <FilterRows rows={rows} onChange={setRows} fields={fields} onEnter={() => void search(0)} />
         )}
 
         {rawMode && (

@@ -1424,12 +1424,41 @@ button.shard-chip.unassigned:hover {
   margin-bottom: 14px;
 }
 
-/* aggregations tab: metric rows under the toolbar */
-.agg-metrics {
+/* aggregations tab */
+.agg-filter {
   display: flex;
   flex-direction: column;
   gap: 6px;
   margin-bottom: 12px;
+}
+
+.agg-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.agg-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.agg-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.agg-section-title {
+  font-size: 11px;
+  color: var(--ink-2);
+  margin-bottom: 6px;
 }
 
 .result-meta {
