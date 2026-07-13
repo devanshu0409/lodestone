@@ -6,10 +6,10 @@ limits.
 
 > Status: **beta** — multi-cluster management with node discovery and failover, cluster
 > overview, shard allocation grid, index management, a data browser with inline document
-> editing, a multi-tab REST console with context-aware query-DSL autocomplete, an analyzer
-> playground, relevance debugging (`_explain` / profile trees), fixture data generation,
-> Java code generation, and cross-platform installers with in-app auto-update. See
-> [REQUIREMENTS.md](REQUIREMENTS.md) for the full spec and roadmap.
+> editing, a no-JSON aggregation builder, a multi-tab REST console with context-aware
+> query-DSL autocomplete, an analyzer playground, relevance debugging (`_explain` / profile
+> trees), fixture data generation, Java code generation, and cross-platform installers with
+> in-app auto-update. See [REQUIREMENTS.md](REQUIREMENTS.md) for the full spec and roadmap.
 
 ![Cluster overview — health, nodes, shards at a glance](docs/screens/overview.png)
 
@@ -97,8 +97,9 @@ app are marked ★ (they're the ones single-cluster tools structurally can't fol
 - **Task manager** — live `_tasks` with reindex progress and cancel.
 - **Bulk import/export** — NDJSON/CSV file → index with mapping preview; full-index
   export via scroll.
-- **Aggregation viewer** — render terms/date-histogram results as tables and
-  sparklines without leaving the search tab.
+- **Best-practices audit** — flag misconfigurations and governance issues per
+  cluster/index: zero-replica indices, oversharding, disk-watermark risk,
+  mapping explosion, deprecated settings.
 
 Windows, macOS, and Linux installers are already built via CI on every `v*` tag, with
 in-app auto-update.
@@ -118,6 +119,12 @@ in-app auto-update.
   aggregations, field names, and enum values suggested based on cursor position),
   sortable paged results, inline document editing with validation and confirm-before-
   overwrite, document delete, export to JSON / NDJSON / CSV.
+- **Aggregations** — a no-JSON aggregation builder: pick a bucket aggregation
+  (terms, date/numeric histogram, ranges, significant terms, missing — or metrics
+  only), stack metrics per bucket (avg, sum, min/max, unique count, value count,
+  stats, percentiles), with field dropdowns filtered to compatible types (text
+  fields aggregate via their `.keyword` sub-field automatically). Results as a
+  sortable table or raw JSON.
 - **Console** — a Dev-Tools-style REST console with multiple parallel request tabs,
   backed by a searchable API catalog: find an operation by intent ("update by query",
   "reindex") and get a documented, pre-filled template. Path autocomplete from the

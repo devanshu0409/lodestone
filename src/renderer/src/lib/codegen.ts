@@ -163,12 +163,15 @@ function buildClass(
   props: Record<string, MappingProperty>,
   imports: Set<string>,
   innerClasses: string[],
+  usedClassNames: Set<string>,
   isRoot: boolean,
+  /** Nesting level of the class itself: 0 = top-level, 1 = inner class. */
   depth: number,
   indexName?: string
 ): string {
   const fields: JavaField[] = []
-  const pad = '    '.repeat(depth)
+  const classPad = '    '.repeat(depth)
+  const pad = '    '.repeat(depth + 1) // class members sit one level deeper
   imports.add('lombok.Data')
 
   if (isRoot) {
@@ -195,12 +198,19 @@ function buildClass(
     const fieldName = camelCase(rawName)
 
     if (prop.properties) {
-      // object / nested → dedicated inner class
-      const inner = pascalCase(rawName)
+      // object / nested → dedicated inner class. Names must be unique: two
+      // "user" objects at different paths would otherwise collide.
+      let inner = pascalCase(rawName)
+      for (let n = 2; usedClassNames.has(inner); n++) inner = `${pascalCase(rawName)}${n}`
+      usedClassNames.add(inner)
       const ft = prop.type === 'nested' ? 'Nested' : 'Object'
       imports.add('org.springframework.data.elasticsearch.annotations.Field')
       imports.add('org.springframework.data.elasticsearch.annotations.FieldType')
-      innerClasses.push(buildClass(inner, prop.properties, imports, innerClasses, false, depth + 1))
+      // All generated classes are spliced in flat, as direct inner classes of
+      // the root — so they always render at depth 1 regardless of mapping depth.
+      innerClasses.push(
+        buildClass(inner, prop.properties, imports, innerClasses, usedClassNames, false, 1)
+      )
       fields.push({
         decl: [
           `${pad}@Field(name = "${rawName}", type = FieldType.${ft})`,
@@ -224,11 +234,14 @@ function buildClass(
             }
           }
           if (innerFieldLines.length > 0) {
+            imports.add('org.springframework.data.elasticsearch.annotations.InnerField')
             const lastDecl = fields[fields.length - 1]
             lastDecl.decl = [
               `${pad}@MultiField(`,
               `${pad}    mainField = @Field(name = "${rawName}", type = FieldType.${ft}),`,
-              ...innerFieldLines,
+              `${pad}    otherFields = {`,
+              innerFieldLines.join(',\n'),
+              `${pad}    }`,
               `${pad})`,
               `${pad}private ${inner} ${fieldName};`
             ]
@@ -273,6 +286,7 @@ function buildClass(
           }
         }
         if (innerFieldLines.length > 0) {
+          imports.add('org.springframework.data.elasticsearch.annotations.InnerField')
           const lastDecl = fields[fields.length - 1]
           const fieldTypeAnn = t.fieldType === null
             ? `${pad}@GeoPointField`
@@ -283,7 +297,9 @@ function buildClass(
             ...(t.comment ? [`${pad}// ${t.comment}`] : []),
             `${pad}@MultiField(`,
             `${pad}    mainField = ${fieldTypeAnn.trim()},`,
-            ...innerFieldLines,
+            `${pad}    otherFields = {`,
+            innerFieldLines.join(',\n'),
+            `${pad}    }`,
             `${pad})`,
             `${pad}private ${t.java} ${fieldName};`
           ]
@@ -294,10 +310,10 @@ function buildClass(
 
   const head = isRoot
     ? `@Data\n@Document(indexName = "${indexName}")\npublic class ${className} {`
-    : `${pad}@Data\n${pad}public static class ${className} {`
+    : `${classPad}@Data\n${classPad}public static class ${className} {`
   const body = fields.map((f) => f.decl.join('\n')).join('\n\n')
 
-  return `${head}\n\n${body}\n${pad}}`
+  return `${head}\n\n${body}\n${classPad}}`
 }
 
 /** Generate a Spring Data Elasticsearch entity from an index mapping. */
@@ -306,13 +322,15 @@ export function mappingToJavaSpring(indexName: string, mapping: MappingRoot): st
   const className = pascalCase(indexName)
   const imports = new Set<string>(['org.springframework.data.elasticsearch.annotations.Document'])
   const innerClasses: string[] = []
-  const root = buildClass(className, props, imports, innerClasses, true, 1, indexName)
+  const usedClassNames = new Set<string>([className])
+  const root = buildClass(className, props, imports, innerClasses, usedClassNames, true, 0, indexName)
 
   // Inner classes are collected depth-first; splice them into the root class
-  // body just before its closing brace.
+  // body just before its closing brace. (Tolerant match — a non-matching
+  // pattern here once silently dropped every nested class.)
   const withInners =
     innerClasses.length > 0
-      ? root.replace(/\n}$/, `\n\n${innerClasses.join('\n\n')}\n}`)
+      ? root.replace(/\n}\s*$/, `\n\n${innerClasses.join('\n\n')}\n}`)
       : root
 
   const importBlock = [...imports].sort().map((i) => `import ${i};`).join('\n')

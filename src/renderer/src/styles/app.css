@@ -1424,6 +1424,14 @@ button.shard-chip.unassigned:hover {
   margin-bottom: 14px;
 }
 
+/* aggregations tab: metric rows under the toolbar */
+.agg-metrics {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
 .result-meta {
   display: flex;
   align-items: center;

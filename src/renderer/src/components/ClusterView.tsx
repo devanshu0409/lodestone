@@ -9,14 +9,16 @@ import { Indices } from './Indices'
 import { SearchWorkspace } from './SearchWorkspace'
 import { Console } from './Console'
 import { AnalyzerPlayground } from './AnalyzerPlayground'
+import { AggTab } from './AggTab'
 
-type Tab = 'overview' | 'shards' | 'indices' | 'search' | 'console' | 'analyze'
+type Tab = 'overview' | 'shards' | 'indices' | 'search' | 'aggs' | 'console' | 'analyze'
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'overview', label: 'Overview' },
   { id: 'shards', label: 'Shards' },
   { id: 'indices', label: 'Indices' },
   { id: 'search', label: 'Search' },
+  { id: 'aggs', label: 'Aggregations' },
   { id: 'console', label: 'Console' },
   { id: 'analyze', label: 'Analyze' }
 ]
@@ -159,6 +161,11 @@ export function ClusterView({ conn }: { conn: ClusterConnection }): React.JSX.El
       {visited.has('search') && (
         <TabPanel active={tab === 'search'}>
           <SearchWorkspace conn={conn} browse={browse} />
+        </TabPanel>
+      )}
+      {visited.has('aggs') && (
+        <TabPanel active={tab === 'aggs'}>
+          <AggTab conn={conn} />
         </TabPanel>
       )}
       {visited.has('console') && (

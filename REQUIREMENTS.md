@@ -1,7 +1,7 @@
 # Elasticsearch Desktop GUI — Requirements Specification
 
 **Status:** Living document — tracks the design rationale and roadmap
-**Date:** 2026-07-11
+**Date:** 2026-07-13
 **License:** Apache 2.0 (open source)
 
 ---
@@ -113,6 +113,10 @@ This project builds a modern, open-source **Electron desktop app** that solves a
   the structured filters and raw mode round-trip where possible.
 - FR-4.4 View / edit / delete individual documents (edit & delete honor guardrails, FR-7).
 - FR-4.5 Export current result set (JSON / NDJSON / CSV).
+- FR-4.6 No-JSON aggregation builder: bucket aggregation (terms, date/numeric
+  histogram, ranges, significant terms, missing) with per-bucket metrics (avg, sum,
+  min/max, cardinality, value count, stats, percentiles); field dropdowns filtered
+  to compatible mapped types. Results as a table or raw JSON.
 
 ### FR-5 Index Management
 - FR-5.1 Index list with health, docs count, size, shard/replica counts; search/filter.
@@ -201,7 +205,8 @@ This project builds a modern, open-source **Electron desktop app** that solves a
 6. **M6 — Developer workbench:** Java/Spring entity generation from mappings,
    copy-as-client-code (cURL + three Java flavors), analyzer playground tab,
    `_explain` scoring trees per search hit, `profile` execution-tree visualization,
-   fixture data generator with bulk load. *(Goals §2, developer workbench)*
+   fixture data generator with bulk load, no-JSON aggregation builder tab.
+   *(Goals §2, developer workbench; FR-4.6)*
 
 All six milestones are implemented; OpenSearch matrix testing against live 1.x/2.x
 clusters remains open before calling it v1.0.
@@ -215,7 +220,8 @@ clusters remains open before calling it v1.0.
 - Workspace persistence (reopen tabs/queries/console sessions as left)
 - Task manager (`_tasks` with progress + cancel)
 - Bulk import/export (NDJSON/CSV file → index; full-index export via scroll)
-- Aggregation result viewer (tables + sparklines)
+- Best-practices / governance audit: per-cluster and per-index checks with warnings
+  (replica counts, shard sizing, disk watermarks, mapping explosion, deprecations)
 - TypeScript / Python generators for entity types and client-code copy
 - Multi-cluster side-by-side comparison view
 - cat-API quick views (`_cat/*` as sortable tables)

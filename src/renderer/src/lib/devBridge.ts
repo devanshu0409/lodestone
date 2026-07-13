@@ -170,29 +170,192 @@ const MESSAGES = [
   'user session refreshed'
 ]
 
-function mockSearch(index: string, from: number, size: number): unknown {
-  const total = 12_487
+const MOCK_TOTAL = 12_487
+
+function mockSource(n: number): Record<string, unknown> {
+  return {
+    '@timestamp': new Date(Date.parse('2026-07-09T06:00:00Z') - n * 47_000).toISOString(),
+    level: LEVELS[n % LEVELS.length],
+    service: SERVICES[n % SERVICES.length],
+    message: MESSAGES[n % MESSAGES.length].replace('{n}', String(n)),
+    bytes: 512 + ((n * 7919) % 48_000),
+    duration_ms: Math.round(((n * 13) % 900) * 10) / 10,
+    success: n % 7 !== 0,
+    user: { id: `u-${(n * 31) % 5000}`, name: `User ${(n * 31) % 5000}` }
+  }
+}
+
+/** Resolve "user.id" / "service.keyword" style paths against a source doc. */
+function mockFieldValue(source: Record<string, unknown>, field: string): unknown {
+  const path = field.endsWith('.keyword') ? field.slice(0, -'.keyword'.length) : field
+  let v: unknown = source
+  for (const seg of path.split('.')) {
+    if (v === null || typeof v !== 'object') return undefined
+    v = (v as Record<string, unknown>)[seg]
+  }
+  return v
+}
+
+interface MockAggSpec {
+  terms?: { field: string; size?: number }
+  significant_terms?: { field: string; size?: number }
+  missing?: { field: string }
+  histogram?: { field: string; interval: number }
+  date_histogram?: { field: string; calendar_interval?: string }
+  range?: { field: string; ranges: { from?: number; to?: number }[] }
+  avg?: { field: string }
+  sum?: { field: string }
+  min?: { field: string }
+  max?: { field: string }
+  value_count?: { field: string }
+  cardinality?: { field: string }
+  stats?: { field: string }
+  percentiles?: { field: string }
+  aggs?: Record<string, MockAggSpec>
+}
+
+const CAL_MS: Record<string, number> = {
+  minute: 60_000,
+  hour: 3_600_000,
+  day: 86_400_000,
+  week: 7 * 86_400_000,
+  month: 30 * 86_400_000,
+  quarter: 91 * 86_400_000,
+  year: 365 * 86_400_000
+}
+
+function mockMetric(spec: MockAggSpec, docs: Record<string, unknown>[]): unknown {
+  const one = <K extends keyof MockAggSpec>(k: K): { field: string } | undefined =>
+    spec[k] as { field: string } | undefined
+  const nums = (field: string): number[] =>
+    docs.map((d) => Number(mockFieldValue(d, field))).filter((v) => Number.isFinite(v))
+  if (one('avg')) {
+    const v = nums(one('avg')!.field)
+    return { value: v.length ? v.reduce((a, b) => a + b, 0) / v.length : null }
+  }
+  if (one('sum')) return { value: nums(one('sum')!.field).reduce((a, b) => a + b, 0) }
+  if (one('min')) { const v = nums(one('min')!.field); return { value: v.length ? Math.min(...v) : null } }
+  if (one('max')) { const v = nums(one('max')!.field); return { value: v.length ? Math.max(...v) : null } }
+  if (one('value_count'))
+    return { value: docs.filter((d) => mockFieldValue(d, one('value_count')!.field) !== undefined).length }
+  if (one('cardinality'))
+    return { value: new Set(docs.map((d) => mockFieldValue(d, one('cardinality')!.field)).filter((v) => v !== undefined)).size }
+  if (one('stats')) {
+    const v = nums(one('stats')!.field)
+    const sum = v.reduce((a, b) => a + b, 0)
+    return {
+      count: v.length,
+      min: v.length ? Math.min(...v) : null,
+      max: v.length ? Math.max(...v) : null,
+      avg: v.length ? sum / v.length : null,
+      sum
+    }
+  }
+  if (one('percentiles')) {
+    const v = nums(one('percentiles')!.field).sort((a, b) => a - b)
+    const p = (q: number): number | null => (v.length ? v[Math.min(v.length - 1, Math.floor((q / 100) * v.length))] : null)
+    return { values: { '1.0': p(1), '25.0': p(25), '50.0': p(50), '75.0': p(75), '95.0': p(95), '99.0': p(99) } }
+  }
+  return null
+}
+
+function mockAggregations(
+  aggs: Record<string, MockAggSpec>,
+  docs: Record<string, unknown>[]
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const [name, spec] of Object.entries(aggs)) {
+    const bucketDef =
+      spec.terms ?? spec.significant_terms ?? spec.histogram ?? spec.date_histogram ?? spec.range ?? spec.missing
+    if (bucketDef) {
+      let buckets: { key: unknown; key_as_string?: string; docs: Record<string, unknown>[] }[] = []
+      if (spec.terms || spec.significant_terms) {
+        const { field, size = 10 } = (spec.terms ?? spec.significant_terms)!
+        const groups = new Map<string, Record<string, unknown>[]>()
+        for (const d of docs) {
+          const v = mockFieldValue(d, field)
+          if (v === undefined) continue
+          const key = String(v)
+          groups.set(key, [...(groups.get(key) ?? []), d])
+        }
+        buckets = [...groups.entries()]
+          .sort((a, b) => b[1].length - a[1].length)
+          .slice(0, size)
+          .map(([key, ds]) => ({ key, docs: ds }))
+      } else if (spec.histogram) {
+        const { field, interval } = spec.histogram
+        const groups = new Map<number, Record<string, unknown>[]>()
+        for (const d of docs) {
+          const v = Number(mockFieldValue(d, field))
+          if (!Number.isFinite(v)) continue
+          const key = Math.floor(v / interval) * interval
+          groups.set(key, [...(groups.get(key) ?? []), d])
+        }
+        buckets = [...groups.entries()].sort((a, b) => a[0] - b[0]).map(([key, ds]) => ({ key, docs: ds }))
+      } else if (spec.date_histogram) {
+        const { field, calendar_interval = 'day' } = spec.date_histogram
+        const ms = CAL_MS[calendar_interval] ?? CAL_MS.day
+        const groups = new Map<number, Record<string, unknown>[]>()
+        for (const d of docs) {
+          const t = Date.parse(String(mockFieldValue(d, field)))
+          if (!Number.isFinite(t)) continue
+          const key = Math.floor(t / ms) * ms
+          groups.set(key, [...(groups.get(key) ?? []), d])
+        }
+        buckets = [...groups.entries()]
+          .sort((a, b) => a[0] - b[0])
+          .map(([key, ds]) => ({ key, key_as_string: new Date(key).toISOString(), docs: ds }))
+      } else if (spec.range) {
+        const { field, ranges } = spec.range
+        buckets = ranges.map((r) => {
+          const ds = docs.filter((d) => {
+            const v = Number(mockFieldValue(d, field))
+            if (!Number.isFinite(v)) return false
+            return (r.from === undefined || v >= r.from) && (r.to === undefined || v < r.to)
+          })
+          const key = `${r.from ?? '*'}-${r.to ?? '*'}`
+          return { key, docs: ds }
+        })
+      } else if (spec.missing) {
+        const { field } = spec.missing
+        buckets = [{ key: 'missing', docs: docs.filter((d) => mockFieldValue(d, field) === undefined) }]
+      }
+      out[name] = {
+        buckets: buckets.map((b) => ({
+          key: b.key,
+          ...(b.key_as_string ? { key_as_string: b.key_as_string } : {}),
+          doc_count: b.docs.length,
+          ...(spec.aggs ? mockAggregations(spec.aggs, b.docs) : {})
+        }))
+      }
+    } else {
+      out[name] = mockMetric(spec, docs)
+    }
+  }
+  return out
+}
+
+function mockSearch(
+  index: string,
+  from: number,
+  size: number,
+  aggs?: Record<string, MockAggSpec>
+): unknown {
+  const total = MOCK_TOTAL
   const count = Math.max(0, Math.min(size, total - from))
   const hits = Array.from({ length: count }, (_, i) => {
     const n = from + i
-    return {
-      _index: index,
-      _id: `doc-${String(n).padStart(6, '0')}`,
-      _source: {
-        '@timestamp': new Date(Date.parse('2026-07-09T06:00:00Z') - n * 47_000).toISOString(),
-        level: LEVELS[n % LEVELS.length],
-        service: SERVICES[n % SERVICES.length],
-        message: MESSAGES[n % MESSAGES.length].replace('{n}', String(n)),
-        bytes: 512 + ((n * 7919) % 48_000),
-        duration_ms: Math.round(((n * 13) % 900) * 10) / 10,
-        success: n % 7 !== 0,
-        user: { id: `u-${(n * 31) % 5000}`, name: `User ${(n * 31) % 5000}` }
-      }
-    }
+    return { _index: index, _id: `doc-${String(n).padStart(6, '0')}`, _source: mockSource(n) }
   })
+  let aggregations: Record<string, unknown> | undefined
+  if (aggs && Object.keys(aggs).length > 0) {
+    const all = Array.from({ length: total }, (_, n) => mockSource(n))
+    aggregations = mockAggregations(aggs, all)
+  }
   return {
     took: 4,
-    hits: { total: { value: total, relation: 'eq' }, hits }
+    hits: { total: { value: total, relation: 'eq' }, hits },
+    ...(aggregations ? { aggregations } : {})
   }
 }
 
@@ -421,8 +584,15 @@ export function installDevBridge(): void {
         if (sub === '_alias')
           return respond({ [target]: { aliases: target.startsWith('logs-') ? { logs: {} } : {} } })
         if (sub === '_search') {
-          const body = (spec.body ?? {}) as { from?: number; size?: number }
-          return respond(mockSearch(target, body.from ?? 0, body.size ?? 25))
+          const body = (spec.body ?? {}) as {
+            from?: number
+            size?: number
+            aggs?: Record<string, MockAggSpec>
+            aggregations?: Record<string, MockAggSpec>
+          }
+          return respond(
+            mockSearch(target, body.from ?? 0, body.size ?? 25, body.aggs ?? body.aggregations)
+          )
         }
         // Mutations (ops, create/delete index, doc save/delete) — acknowledge.
         if (spec.method !== 'GET' && spec.method !== 'HEAD')
