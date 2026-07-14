@@ -14,11 +14,11 @@ import { IndexPicker } from './SearchTab'
 import { JsonView } from './JsonView'
 
 /* ------------------------------------------------------------------ *
- * Aggregation model
+ * Aggregation model — each aggregation is a nesting chain of bucket
+ * levels (outer → inner) with metrics computed at the innermost level.
  * ------------------------------------------------------------------ */
 
 type BucketType =
-  | 'none'
   | 'terms'
   | 'date_histogram'
   | 'histogram'
@@ -32,8 +32,7 @@ const BUCKET_OPTIONS: { value: BucketType; label: string }[] = [
   { value: 'histogram', label: 'Numeric histogram' },
   { value: 'range', label: 'Numeric ranges' },
   { value: 'significant_terms', label: 'Significant terms' },
-  { value: 'missing', label: 'Missing (field absent)' },
-  { value: 'none', label: 'No buckets — metrics only' }
+  { value: 'missing', label: 'Missing (field absent)' }
 ]
 
 type MetricType =
@@ -71,8 +70,8 @@ interface MetricRow {
   field: string
 }
 
-/** One independent aggregation: a bucket definition plus per-bucket metrics. */
-interface AggDef {
+/** One nesting level (bucket aggregation). */
+interface BucketLevel {
   id: number
   bucketType: BucketType
   bucketField: string
@@ -80,24 +79,38 @@ interface AggDef {
   interval: string
   calendarInterval: string
   edges: string
+}
+
+/** One aggregation: an ordered chain of bucket levels + leaf metrics. Empty
+ *  `levels` means metrics computed over all matching docs (no grouping). */
+interface AggDef {
+  id: number
+  levels: BucketLevel[]
   metrics: MetricRow[]
 }
 
 let seq = 0
-const newAggDef = (): AggDef => ({
+const newLevel = (): BucketLevel => ({
   id: ++seq,
   bucketType: 'terms',
   bucketField: '',
   termsSize: 10,
   interval: '100',
   calendarInterval: 'day',
-  edges: '0,100,1000',
-  metrics: []
+  edges: '0,100,1000'
 })
+const newAggDef = (): AggDef => ({ id: ++seq, levels: [newLevel()], metrics: [] })
 
 interface AggResponse {
   took?: number
   aggregations?: Record<string, unknown>
+}
+
+interface Bucket {
+  key: unknown
+  key_as_string?: string
+  doc_count: number
+  [k: string]: unknown
 }
 
 /* ------------------------------------------------------------------ *
@@ -151,8 +164,6 @@ export function AggTab({ conn }: { conn: ClusterConnection }): React.JSX.Element
       case 'histogram':
       case 'range':
         return numeric
-      case 'none':
-        return []
       default:
         return keywordish
     }
@@ -162,53 +173,64 @@ export function AggTab({ conn }: { conn: ClusterConnection }): React.JSX.Element
     METRIC_OPTIONS.find((m) => m.value === type)?.numeric ? numeric : keywordish
 
   const patchDef = (id: number, p: Partial<AggDef>): void =>
+    setAggDefs((ds) => ds.map((d) => (d.id === id ? { ...d, ...p } : d)))
+
+  const patchLevel = (defId: number, levelId: number, p: Partial<BucketLevel>): void =>
     setAggDefs((ds) =>
-      ds.map((d) => {
-        if (d.id !== id) return d
-        const next = { ...d, ...p }
-        // Keep the bucket field compatible with the (possibly new) bucket type.
-        const choices = bucketChoices(next.bucketType)
-        if (next.bucketType !== 'none' && !choices.some((f) => f.path === next.bucketField)) {
-          next.bucketField = choices[0]?.path ?? ''
-        }
-        return next
-      })
+      ds.map((d) =>
+        d.id !== defId
+          ? d
+          : {
+              ...d,
+              levels: d.levels.map((l) => {
+                if (l.id !== levelId) return l
+                const next = { ...l, ...p }
+                // Keep the field valid for the (possibly new) bucket type.
+                const choices = bucketChoices(next.bucketType)
+                if (!choices.some((f) => f.path === next.bucketField)) {
+                  next.bucketField = choices[0]?.path ?? ''
+                }
+                return next
+              })
+            }
+      )
     )
 
-  // When the index (and so the field list) changes, re-anchor every def.
+  // Re-anchor every field to the current index's mapping when it changes.
   useEffect(() => {
     setAggDefs((ds) =>
-      ds.map((d) => {
-        const choices = bucketChoices(d.bucketType)
-        const bucketField = choices.some((f) => f.path === d.bucketField)
-          ? d.bucketField
-          : (choices[0]?.path ?? '')
-        const metrics = d.metrics.map((m) =>
+      ds.map((d) => ({
+        ...d,
+        levels: d.levels.map((l) => {
+          const choices = bucketChoices(l.bucketType)
+          return choices.some((f) => f.path === l.bucketField)
+            ? l
+            : { ...l, bucketField: choices[0]?.path ?? '' }
+        }),
+        metrics: d.metrics.map((m) =>
           metricFieldChoices(m.type).some((f) => f.path === m.field)
             ? m
             : { ...m, field: metricFieldChoices(m.type)[0]?.path ?? '' }
         )
-        return { ...d, bucketField, metrics }
-      })
+      }))
     )
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fields])
 
   const esField = (path: string): string => fieldMap.get(path)?.sortPath ?? path
-
   const metricKey = (m: MetricRow): string => `${m.type}_${m.field.replace(/[^\w]/g, '_')}`
 
-  const buildBucketParams = (d: AggDef): Record<string, unknown> | null => {
-    switch (d.bucketType) {
+  const bucketParams = (l: BucketLevel): Record<string, unknown> | null => {
+    switch (l.bucketType) {
       case 'terms':
       case 'significant_terms':
-        return { field: esField(d.bucketField), size: d.termsSize }
+        return { field: esField(l.bucketField), size: l.termsSize }
       case 'date_histogram':
-        return { field: d.bucketField, calendar_interval: d.calendarInterval }
+        return { field: l.bucketField, calendar_interval: l.calendarInterval }
       case 'histogram':
-        return { field: d.bucketField, interval: Number(d.interval) || 1 }
+        return { field: l.bucketField, interval: Number(l.interval) || 1 }
       case 'range': {
-        const bounds = d.edges
+        const bounds = l.edges
           .split(',')
           .map((e) => Number(e.trim()))
           .filter((n) => Number.isFinite(n))
@@ -217,36 +239,45 @@ export function AggTab({ conn }: { conn: ClusterConnection }): React.JSX.Element
         const ranges: { from?: number; to?: number }[] = [{ to: bounds[0] }]
         for (let i = 0; i < bounds.length - 1; i++) ranges.push({ from: bounds[i], to: bounds[i + 1] })
         ranges.push({ from: bounds[bounds.length - 1] })
-        return { field: d.bucketField, ranges }
+        return { field: l.bucketField, ranges }
       }
       case 'missing':
-        return { field: esField(d.bucketField) }
+        return { field: esField(l.bucketField) }
       default:
         return null
     }
   }
 
-  /** All aggregation defs → one sibling `aggs` map. Bucket defs nest their
-   *  metrics; metrics-only defs contribute top-level metric aggs. */
   const buildAggs = (): Record<string, unknown> | null => {
     const out: Record<string, unknown> = {}
     for (const d of aggDefs) {
       const metricAggs: Record<string, unknown> = {}
       for (const m of d.metrics) {
-        if (!m.field) continue
-        metricAggs[metricKey(m)] = { [m.type]: { field: esField(m.field) } }
+        if (m.field) metricAggs[metricKey(m)] = { [m.type]: { field: esField(m.field) } }
       }
-      if (d.bucketType === 'none') {
+      // No grouping → metrics over all matching docs.
+      if (d.levels.length === 0) {
         for (const [k, v] of Object.entries(metricAggs)) out[`agg${d.id}_${k}`] = v
         continue
       }
-      if (!d.bucketField) continue
-      const params = buildBucketParams(d)
-      if (!params) continue
-      out[`agg${d.id}`] = {
-        [d.bucketType]: params,
-        ...(Object.keys(metricAggs).length ? { aggs: metricAggs } : {})
+      if (d.levels.some((l) => !l.bucketField)) continue
+      // Recursively nest: level i's sub-aggs are keyed `l{i+1}`; the leaf holds metrics.
+      const buildLevel = (i: number): Record<string, unknown> | null => {
+        const params = bucketParams(d.levels[i])
+        if (!params) return null
+        const node: Record<string, unknown> = { [d.levels[i].bucketType]: params }
+        const child: Record<string, unknown> = {}
+        if (i < d.levels.length - 1) {
+          const c = buildLevel(i + 1)
+          if (c) child[`l${i + 1}`] = c
+        } else {
+          Object.assign(child, metricAggs)
+        }
+        if (Object.keys(child).length) node.aggs = child
+        return node
       }
+      const top = buildLevel(0)
+      if (top) out[`agg${d.id}`] = top
     }
     return Object.keys(out).length ? out : null
   }
@@ -254,7 +285,7 @@ export function AggTab({ conn }: { conn: ClusterConnection }): React.JSX.Element
   const run = async (): Promise<void> => {
     const aggs = buildAggs()
     if (!aggs) {
-      setError('Configure at least one aggregation (a bucket field, or a metric for metrics-only).')
+      setError('Configure at least one aggregation (a group-by field, or a metric).')
       return
     }
     setRunning(true)
@@ -303,20 +334,30 @@ export function AggTab({ conn }: { conn: ClusterConnection }): React.JSX.Element
     return formatNum(v)
   }
 
-  const defSummary = (d: AggDef): string => {
-    const opt = BUCKET_OPTIONS.find((b) => b.value === d.bucketType)?.label ?? d.bucketType
-    return d.bucketType === 'none' ? 'Metrics only' : `${opt} — ${d.bucketField}`
+  /** Flatten a nested-bucket response into one row per leaf bucket. */
+  const flatten = (d: AggDef): { keys: unknown[]; doc_count: number; bucket: Bucket }[] => {
+    const rows: { keys: unknown[]; doc_count: number; bucket: Bucket }[] = []
+    const walk = (node: unknown, i: number, keyPath: unknown[]): void => {
+      const buckets = (node as { buckets?: Bucket[] } | undefined)?.buckets ?? []
+      for (const b of buckets) {
+        const path = [...keyPath, b.key_as_string ?? b.key]
+        if (i === d.levels.length - 1) rows.push({ keys: path, doc_count: b.doc_count, bucket: b })
+        else walk(b[`l${i + 1}`], i + 1, path)
+      }
+    }
+    walk(response?.aggregations?.[`agg${d.id}`], 0, [])
+    return rows
   }
+
+  const chainSummary = (d: AggDef): string =>
+    d.levels.length === 0 ? 'Metrics only' : d.levels.map((l) => l.bucketField || '?').join(' → ')
 
   return (
     <div className="shards-view">
       <div className="grid-toolbar">
         <IndexPicker targets={targets} value={index} onChange={setIndex} />
         <div className="spacer" />
-        <button
-          className="btn ghost"
-          onClick={() => setAggDefs((ds) => [...ds, newAggDef()])}
-        >
+        <button className="btn ghost" onClick={() => setAggDefs((ds) => [...ds, newAggDef()])}>
           <Plus size={12} /> Add aggregation
         </button>
         <button className="btn primary" disabled={running || !index} onClick={() => void run()}>
@@ -345,87 +386,111 @@ export function AggTab({ conn }: { conn: ClusterConnection }): React.JSX.Element
                 </button>
               )}
             </div>
-            <div className="filter-row" style={{ flexWrap: 'wrap' }}>
-              <select
-                className="input mono"
-                value={d.bucketType}
-                onChange={(e) => patchDef(d.id, { bucketType: e.target.value as BucketType })}
-                title="Bucket aggregation"
-              >
-                {BUCKET_OPTIONS.map((b) => (
-                  <option key={b.value} value={b.value}>
-                    {b.label}
-                  </option>
-                ))}
-              </select>
-              {d.bucketType !== 'none' && (
+
+            {/* nesting chain of bucket levels */}
+            {d.levels.map((lvl, li) => (
+              <div key={lvl.id} className="filter-row" style={{ flexWrap: 'wrap' }}>
+                <span className="conj-lead mono">{li === 0 ? 'group by' : 'then by'}</span>
                 <select
                   className="input mono"
-                  style={{ flex: 1, minWidth: 160 }}
-                  value={d.bucketField}
-                  onChange={(e) => patchDef(d.id, { bucketField: e.target.value })}
+                  value={lvl.bucketType}
+                  onChange={(e) => patchLevel(d.id, lvl.id, { bucketType: e.target.value as BucketType })}
+                  title="Bucket aggregation"
+                >
+                  {BUCKET_OPTIONS.map((b) => (
+                    <option key={b.value} value={b.value}>
+                      {b.label}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  className="input mono"
+                  style={{ flex: 1, minWidth: 150 }}
+                  value={lvl.bucketField}
+                  onChange={(e) => patchLevel(d.id, lvl.id, { bucketField: e.target.value })}
                   title="Bucket field"
                 >
-                  {bucketChoices(d.bucketType).length === 0 && (
+                  {bucketChoices(lvl.bucketType).length === 0 && (
                     <option value="">— no compatible field —</option>
                   )}
-                  {bucketChoices(d.bucketType).map((f) => (
+                  {bucketChoices(lvl.bucketType).map((f) => (
                     <option key={f.path} value={f.path}>
                       {f.path} ({f.type})
                     </option>
                   ))}
                 </select>
-              )}
-              {(d.bucketType === 'terms' || d.bucketType === 'significant_terms') && (
-                <input
-                  className="input mono"
-                  style={{ width: 70 }}
-                  type="number"
-                  min={1}
-                  max={1000}
-                  value={d.termsSize}
-                  onChange={(e) => patchDef(d.id, { termsSize: Number(e.target.value) || 10 })}
-                  title="Number of buckets"
-                />
-              )}
-              {d.bucketType === 'date_histogram' && (
-                <select
-                  className="input mono"
-                  value={d.calendarInterval}
-                  onChange={(e) => patchDef(d.id, { calendarInterval: e.target.value })}
-                  title="Calendar interval"
+                {(lvl.bucketType === 'terms' || lvl.bucketType === 'significant_terms') && (
+                  <input
+                    className="input mono"
+                    style={{ width: 66 }}
+                    type="number"
+                    min={1}
+                    max={1000}
+                    value={lvl.termsSize}
+                    onChange={(e) => patchLevel(d.id, lvl.id, { termsSize: Number(e.target.value) || 10 })}
+                    title="Top N buckets"
+                  />
+                )}
+                {lvl.bucketType === 'date_histogram' && (
+                  <select
+                    className="input mono"
+                    value={lvl.calendarInterval}
+                    onChange={(e) => patchLevel(d.id, lvl.id, { calendarInterval: e.target.value })}
+                    title="Calendar interval"
+                  >
+                    {CALENDAR_INTERVALS.map((c) => (
+                      <option key={c} value={c}>
+                        per {c}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                {lvl.bucketType === 'histogram' && (
+                  <input
+                    className="input mono"
+                    style={{ width: 90 }}
+                    value={lvl.interval}
+                    onChange={(e) => patchLevel(d.id, lvl.id, { interval: e.target.value })}
+                    placeholder="interval"
+                    title="Interval"
+                  />
+                )}
+                {lvl.bucketType === 'range' && (
+                  <input
+                    className="input mono"
+                    style={{ width: 150 }}
+                    value={lvl.edges}
+                    onChange={(e) => patchLevel(d.id, lvl.id, { edges: e.target.value })}
+                    placeholder="0,100,1000"
+                    title="Range boundaries, comma-separated"
+                  />
+                )}
+                <button
+                  className="icon-btn"
+                  title="Remove this level"
+                  onClick={() => patchDef(d.id, { levels: d.levels.filter((x) => x.id !== lvl.id) })}
                 >
-                  {CALENDAR_INTERVALS.map((c) => (
-                    <option key={c} value={c}>
-                      per {c}
-                    </option>
-                  ))}
-                </select>
-              )}
-              {d.bucketType === 'histogram' && (
-                <input
-                  className="input mono"
-                  style={{ width: 90 }}
-                  value={d.interval}
-                  onChange={(e) => patchDef(d.id, { interval: e.target.value })}
-                  title="Interval"
-                  placeholder="interval"
-                />
-              )}
-              {d.bucketType === 'range' && (
-                <input
-                  className="input mono"
-                  style={{ width: 160 }}
-                  value={d.edges}
-                  onChange={(e) => patchDef(d.id, { edges: e.target.value })}
-                  title="Range boundaries, comma-separated"
-                  placeholder="0,100,1000"
-                />
-              )}
-            </div>
+                  <X size={13} />
+                </button>
+              </div>
+            ))}
+            {d.levels.length === 0 && (
+              <span className="hint" style={{ fontSize: 11, color: 'var(--ink-3)' }}>
+                No grouping — metrics computed over all matching documents.
+              </span>
+            )}
+            <button
+              className="btn ghost"
+              style={{ alignSelf: 'flex-start' }}
+              onClick={() => patchDef(d.id, { levels: [...d.levels, newLevel()] })}
+            >
+              <Plus size={12} /> {d.levels.length === 0 ? 'Add group-by' : 'Add sub-bucket (nest deeper)'}
+            </button>
 
+            {/* metrics computed at the innermost bucket */}
             {d.metrics.map((m) => (
-              <div key={m.id} className="filter-row" style={{ maxWidth: 620 }}>
+              <div key={m.id} className="filter-row" style={{ maxWidth: 640 }}>
+                <span className="conj-lead mono">metric</span>
                 <select
                   className="input mono"
                   value={m.type}
@@ -472,9 +537,7 @@ export function AggTab({ conn }: { conn: ClusterConnection }): React.JSX.Element
                 <button
                   className="icon-btn"
                   title="Remove metric"
-                  onClick={() =>
-                    patchDef(d.id, { metrics: d.metrics.filter((x) => x.id !== m.id) })
-                  }
+                  onClick={() => patchDef(d.id, { metrics: d.metrics.filter((x) => x.id !== m.id) })}
                 >
                   <X size={13} />
                 </button>
@@ -489,7 +552,7 @@ export function AggTab({ conn }: { conn: ClusterConnection }): React.JSX.Element
                 })
               }
             >
-              <Plus size={12} /> Add metric{d.bucketType !== 'none' ? ' (per bucket)' : ''}
+              <Plus size={12} /> Add metric{d.levels.length > 0 ? ' (per innermost bucket)' : ''}
             </button>
           </div>
         ))}
@@ -518,13 +581,11 @@ export function AggTab({ conn }: { conn: ClusterConnection }): React.JSX.Element
             </div>
           ) : (
             aggDefs.map((d, di) => {
-              if (d.bucketType === 'none') {
+              if (d.levels.length === 0) {
                 if (d.metrics.length === 0) return null
                 return (
                   <div key={d.id} className="agg-result">
-                    <div className="agg-section-title mono">
-                      #{di + 1} · {defSummary(d)}
-                    </div>
+                    <div className="agg-section-title mono">#{di + 1} · Metrics only</div>
                     <div className="shard-grid-wrap" style={{ marginBottom: 14 }}>
                       <table className="data-table" style={{ border: 'none' }}>
                         <thead>
@@ -548,20 +609,19 @@ export function AggTab({ conn }: { conn: ClusterConnection }): React.JSX.Element
                   </div>
                 )
               }
-              const buckets = (response.aggregations?.[`agg${d.id}`] as
-                | { buckets?: Record<string, unknown>[] }
-                | undefined)?.buckets
-              if (!buckets) return null
+              const rows = flatten(d)
               return (
                 <div key={d.id} className="agg-result">
                   <div className="agg-section-title mono">
-                    #{di + 1} · {defSummary(d)} · {buckets.length} buckets
+                    #{di + 1} · {chainSummary(d)} · {rows.length} rows
                   </div>
                   <div className="shard-grid-wrap" style={{ marginBottom: 14 }}>
                     <table className="data-table" style={{ border: 'none' }}>
                       <thead>
                         <tr>
-                          <th>{d.bucketField || 'Key'}</th>
+                          {d.levels.map((l) => (
+                            <th key={l.id}>{l.bucketField || 'key'}</th>
+                          ))}
                           <th>Docs</th>
                           {d.metrics.map((m) => (
                             <th key={m.id}>{metricLabel(m)}</th>
@@ -569,20 +629,24 @@ export function AggTab({ conn }: { conn: ClusterConnection }): React.JSX.Element
                         </tr>
                       </thead>
                       <tbody>
-                        {buckets.map((b, i) => (
+                        {rows.map((r, i) => (
                           <tr key={i}>
-                            <td className="mono">{String(b.key_as_string ?? b.key)}</td>
-                            <td className="mono">{formatNum(b.doc_count)}</td>
+                            {r.keys.map((k, ki) => (
+                              <td key={ki} className="mono">
+                                {String(k)}
+                              </td>
+                            ))}
+                            <td className="mono">{formatNum(r.doc_count)}</td>
                             {d.metrics.map((m) => (
                               <td key={m.id} className="mono">
-                                {renderMetricValue(b[metricKey(m)])}
+                                {renderMetricValue(r.bucket[metricKey(m)])}
                               </td>
                             ))}
                           </tr>
                         ))}
-                        {buckets.length === 0 && (
+                        {rows.length === 0 && (
                           <tr>
-                            <td colSpan={2 + d.metrics.length} className="sg-empty">
+                            <td colSpan={d.levels.length + 1 + d.metrics.length} className="sg-empty">
                               No buckets returned.
                             </td>
                           </tr>
@@ -599,8 +663,8 @@ export function AggTab({ conn }: { conn: ClusterConnection }): React.JSX.Element
 
       {!response && !error && (
         <p className="cat-empty" style={{ marginTop: 12 }}>
-          Add one or more aggregations, optionally scope them with a filter, then Run. Each
-          aggregation renders its own table; switch to JSON for the raw response.
+          Group by one or more fields (nest with “Add sub-bucket”), add metrics, optionally scope
+          with a filter, then Run. Nested groupings flatten into one row per innermost bucket.
         </p>
       )}
     </div>

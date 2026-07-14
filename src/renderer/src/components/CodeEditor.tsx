@@ -128,7 +128,8 @@ export function CodeEditor({
   readOnly = false,
   height = 220,
   suggestFields,
-  language = 'json'
+  language = 'json',
+  onReady
 }: {
   value: string
   onChange?: (value: string) => void
@@ -138,12 +139,16 @@ export function CodeEditor({
   suggestFields?: string[]
   /** Monaco language id (default json). */
   language?: string
+  /** Receives the editor instance once created (e.g. to trigger find). */
+  onReady?: (editor: monaco.editor.IStandaloneCodeEditor) => void
 }): React.JSX.Element {
   const hostRef = useRef<HTMLDivElement>(null)
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null)
   const modelUriRef = useRef<string | null>(null)
   const onChangeRef = useRef(onChange)
   onChangeRef.current = onChange
+  const onReadyRef = useRef(onReady)
+  onReadyRef.current = onReady
   const suggestRef = useRef(suggestFields)
   suggestRef.current = suggestFields
   const theme = useResolvedTheme()
@@ -183,15 +188,19 @@ export function CodeEditor({
     const modelUri = editor.getModel()?.uri.toString() ?? null
     modelUriRef.current = modelUri
     if (modelUri && suggestRef.current) suggestRegistry.set(modelUri, suggestRef.current)
+    onReadyRef.current?.(editor)
     const sub = editor.onDidChangeModelContent(() => {
       onChangeRef.current?.(editor.getValue())
     })
 
     // Re-layout to the real box whenever it changes size (dialog settling,
-    // window resize, split-pane drags). ResizeObserver fires once immediately
-    // with the settled dimensions, which clears the sentinel scroll height.
+    // window resize, split-pane drags). Use the CONTENT box (clientWidth/Height,
+    // excludes the 1px border) — getBoundingClientRect is the border box, and
+    // feeding that to Monaco makes it render 2px oversized so overflow:hidden
+    // clips the right scrollbar and the bottom edge.
     const ro = new ResizeObserver(() => {
-      const { width, height } = host.getBoundingClientRect()
+      const width = host.clientWidth
+      const height = host.clientHeight
       if (width > 0 && height > 0) editor.layout({ width, height })
     })
     ro.observe(host)

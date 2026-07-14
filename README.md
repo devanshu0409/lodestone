@@ -119,13 +119,14 @@ in-app auto-update.
   aggregations, field names, and enum values suggested based on cursor position),
   sortable paged results, inline document editing with validation and confirm-before-
   overwrite, document delete, export to JSON / NDJSON / CSV.
-- **Aggregations** — a no-JSON aggregation builder: run several aggregations in one
-  request, each a bucket aggregation (terms, date/numeric histogram, ranges,
-  significant terms, missing — or metrics only) with per-bucket metrics (avg, sum,
-  min/max, unique count, value count, stats, percentiles). An optional structured
-  filter (the same builder as Search) scopes every aggregation. Field dropdowns are
-  filtered to compatible types (text fields aggregate via their `.keyword` sub-field
-  automatically); each aggregation renders its own table, or view the raw JSON.
+- **Aggregations** — a no-JSON aggregation builder with **nested** groupings: chain
+  bucket aggregations (terms, date/numeric histogram, ranges, significant terms,
+  missing) — "group by service, then by day" — with metrics (avg, sum, min/max, unique
+  count, value count, stats, percentiles) computed at the innermost bucket. Nested
+  results flatten into one row per leaf bucket, one column per level. An optional
+  structured filter (the same builder as Search) scopes the whole thing, field
+  dropdowns are filtered to compatible types (text aggregates via `.keyword`
+  automatically), and you can view the raw JSON at any point.
 - **Console** — a Dev-Tools-style REST console with multiple parallel request tabs,
   backed by a searchable API catalog: find an operation by intent ("update by query",
   "reindex") and get a documented, pre-filled template. Path autocomplete from the

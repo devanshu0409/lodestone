@@ -113,12 +113,13 @@ This project builds a modern, open-source **Electron desktop app** that solves a
   the structured filters and raw mode round-trip where possible.
 - FR-4.4 View / edit / delete individual documents (edit & delete honor guardrails, FR-7).
 - FR-4.5 Export current result set (JSON / NDJSON / CSV).
-- FR-4.6 No-JSON aggregation builder: multiple sibling aggregations per run, each a
-  bucket aggregation (terms, date/numeric histogram, ranges, significant terms,
-  missing — or metrics only) with per-bucket metrics (avg, sum, min/max, cardinality,
-  value count, stats, percentiles); an optional structured filter (shared with FR-4.2)
-  scopes all aggregations; field dropdowns filtered to compatible mapped types.
-  Results as one table per aggregation, or raw JSON.
+- FR-4.6 No-JSON aggregation builder: nested bucket aggregations (an ordered chain of
+  terms, date/numeric histogram, ranges, significant terms, missing) with metrics
+  (avg, sum, min/max, cardinality, value count, stats, percentiles) at the innermost
+  bucket; nested results flatten to one row per leaf bucket, one column per level.
+  Multiple sibling aggregations per run; an optional structured filter (shared with
+  FR-4.2) scopes them; field dropdowns filtered to compatible mapped types. Results as
+  a table per aggregation, or raw JSON.
 
 ### FR-5 Index Management
 - FR-5.1 Index list with health, docs count, size, shard/replica counts; search/filter.

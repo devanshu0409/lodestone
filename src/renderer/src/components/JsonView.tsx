@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
+import type * as monaco from 'monaco-editor'
 import { CodeEditor } from './CodeEditor'
 import { evalJsonPath } from '../lib/jsonpath'
 
@@ -13,8 +14,9 @@ function pretty(value: unknown): string {
 
 /**
  * Read-only JSON viewer with a JSONPath filter box. Typing a path narrows the
- * shown JSON to the matches; an empty path shows the whole document. Used
- * wherever we surface JSON (console response, search results as JSON).
+ * shown JSON to the matches; an empty path shows the whole document. Ctrl/Cmd+F
+ * anywhere in the view opens Monaco's find widget. Used wherever we surface
+ * JSON (console response, search results as JSON, aggregation results).
  */
 export function JsonView({
   value,
@@ -26,6 +28,7 @@ export function JsonView({
   const [path, setPath] = useState('')
   const isString = typeof value === 'string'
   const trimmed = path.trim()
+  const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null)
 
   const { text, error, count } = useMemo(() => {
     if (isString || !trimmed || trimmed === '$') return { text: pretty(value), error: null, count: -1 }
@@ -39,8 +42,25 @@ export function JsonView({
     }
   }, [value, trimmed, isString])
 
+  const openFind = (): void => {
+    const ed = editorRef.current
+    if (!ed) return
+    ed.focus()
+    ed.getAction('actions.find')?.run()
+  }
+
   return (
-    <div className="json-view">
+    <div
+      className="json-view"
+      onKeyDown={(e) => {
+        // Route Ctrl/Cmd+F to the editor's find widget from anywhere in the view
+        // (e.g. while the cursor is still in the JSONPath box).
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
+          e.preventDefault()
+          openFind()
+        }
+      }}
+    >
       {!isString && (
         <div className="json-path-bar">
           <input
@@ -52,12 +72,16 @@ export function JsonView({
           />
           {error ? (
             <span className="json-path-msg err">{error}</span>
+          ) : count >= 0 ? (
+            <span className="json-path-msg">{count} match{count === 1 ? '' : 'es'}</span>
           ) : (
-            count >= 0 && <span className="json-path-msg">{count} match{count === 1 ? '' : 'es'}</span>
+            <button className="json-find-btn" title="Find (Ctrl+F)" onClick={openFind}>
+              ⌕ Find
+            </button>
           )}
         </div>
       )}
-      <CodeEditor value={text} readOnly height={height} />
+      <CodeEditor value={text} readOnly height={height} onReady={(ed) => (editorRef.current = ed)} />
     </div>
   )
 }

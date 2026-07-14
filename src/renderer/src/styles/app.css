@@ -1419,7 +1419,8 @@ button.shard-chip.unassigned:hover {
 }
 
 .search-json {
-  height: 420px;
+  flex: 1;
+  min-height: 0;
   display: flex;
   margin-bottom: 14px;
 }
@@ -1990,6 +1991,20 @@ button.shard-chip.unassigned:hover {
 }
 .json-path-msg.err {
   color: var(--danger);
+}
+.json-find-btn {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--ink-3);
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+}
+.json-find-btn:hover {
+  color: var(--ink);
+  border-color: var(--border-strong);
 }
 
 .pane-label {
