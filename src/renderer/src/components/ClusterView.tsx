@@ -9,7 +9,7 @@ import { Indices } from './Indices'
 import { SearchWorkspace } from './SearchWorkspace'
 import { Console } from './Console'
 import { AnalyzerPlayground } from './AnalyzerPlayground'
-import { AggTab } from './AggTab'
+import { AggWorkspace } from './AggWorkspace'
 
 type Tab = 'overview' | 'shards' | 'indices' | 'search' | 'aggs' | 'console' | 'analyze'
 
@@ -165,7 +165,7 @@ export function ClusterView({ conn }: { conn: ClusterConnection }): React.JSX.El
       )}
       {visited.has('aggs') && (
         <TabPanel active={tab === 'aggs'}>
-          <AggTab conn={conn} />
+          <AggWorkspace conn={conn} />
         </TabPanel>
       )}
       {visited.has('console') && (

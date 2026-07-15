@@ -1,6 +1,6 @@
 {
   "name": "lodestone",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "Open-source desktop GUI for Elasticsearch and OpenSearch — multi-cluster, multi-node, offline-friendly.",
   "author": "Lodestone contributors",
   "homepage": "https://github.com/devanshu0409/lodestone",
