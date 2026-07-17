@@ -53,6 +53,11 @@ mac:
       arch: [x64, arm64]
   icon: build/icon.png
   category: public.app-category.developer-tools
+  # Without this, electron-builder drops the arch suffix for the default arch
+  # (x64), so the Intel dmg ships as the unsuffixed "Lodestone-x.y.z.dmg" and
+  # reads as the canonical Mac download — Apple Silicon users pick it and run
+  # the whole app under Rosetta. Forcing the pattern labels both archs.
+  artifactName: ${productName}-${version}-${arch}.${ext}
   # Unsigned by default; set CSC_LINK / CSC_KEY_PASSWORD to sign + notarize.
   identity: null
 

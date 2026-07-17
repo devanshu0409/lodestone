@@ -6,8 +6,11 @@ import {
   ChevronRight,
   Download,
   Maximize2,
-  Play
+  Play,
+  Star,
+  Trash2
 } from 'lucide-react'
+import * as Dialog from '@radix-ui/react-dialog'
 import type { ClusterConnection } from '@shared/types'
 import { useApp } from '../store'
 import {
@@ -22,10 +25,11 @@ import {
 } from '../lib/api'
 import { formatCompact } from '../lib/format'
 import { buildQuery, coerce, newRow, type FilterRow } from '../lib/filterQuery'
+import { deleteSaved, listSaved, saveSearch, type SavedSearch } from '../lib/savedSearches'
 import { CodeEditor } from './CodeEditor'
 import { FilterRows } from './FilterRows'
 import { JsonView } from './JsonView'
-import { Menu, MenuItem } from './ui'
+import { Menu, MenuItem, MenuSep } from './ui'
 import { DocDrawer } from './DocDrawer'
 
 /* ---------- inline editing ---------- */
@@ -95,8 +99,11 @@ export function SearchTab({
   const [edits, setEdits] = useState<Record<string, Record<string, string>>>({})
   const [editingCell, setEditingCell] = useState<{ key: string; field: string } | null>(null)
   const [savingEdits, setSavingEdits] = useState(false)
+  const [saved, setSaved] = useState<SavedSearch[]>([])
+  const [saveName, setSaveName] = useState<string | null>(null)
 
   const fieldMap = useMemo(() => new Map(fields.map((f) => [f.path, f])), [fields])
+  const restoringRef = useRef(false)
 
   // Report the current index up to a hosting workspace (for tab labels).
   const onIndexChangeRef = useRef(onIndexChange)
@@ -178,6 +185,30 @@ export function SearchTab({
     }
   }
 
+  useEffect(() => setSaved(listSaved(conn.id)), [conn.id])
+
+  const applySaved = (s: SavedSearch): void => {
+    // Changing the index fires an effect that resets sort — which would wipe the
+    // sort restored here. Flag the restore so that effect leaves it alone once.
+    // Only arm it when the index actually changes, or the effect never runs to
+    // clear the flag and it would swallow the next legitimate sort reset.
+    restoringRef.current = s.index !== index
+    setRawMode(s.rawMode)
+    setRawJson(s.rawJson)
+    setRows(s.rows.length ? s.rows : [newRow()])
+    setSort(s.sort)
+    setSize(s.size)
+    setIndex(s.index)
+  }
+
+  const commitSave = (): void => {
+    const name = (saveName ?? '').trim()
+    if (!name) return
+    setSaved(saveSearch(conn.id, { name, index, rawMode, rawJson, rows, sort, size, savedAt: Date.now() }))
+    setSaveName(null)
+    pushToast('ok', `Saved “${name}”`)
+  }
+
   // Load index + alias targets for the picker.
   useEffect(() => {
     Promise.all([fetchCatIndices(conn.id), fetchCatAliases(conn.id)])
@@ -198,7 +229,10 @@ export function SearchTab({
     fetchFields(conn.id, index)
       .then(setFields)
       .catch(() => setFields([]))
-    setSort(null)
+    // A saved search restores its own sort — don't clobber it on the index change
+    // that restoring it caused.
+    if (restoringRef.current) restoringRef.current = false
+    else setSort(null)
     setPage(0)
     setResult(null)
   }, [conn.id, index])
@@ -318,6 +352,48 @@ export function SearchTab({
             {rawMode ? 'Filter builder' : 'Raw query'}
           </button>
           <div className="spacer" />
+          <Menu
+            trigger={
+              <button className="btn ghost" title="Saved searches">
+                <Star size={13} />
+                Saved
+                {saved.length > 0 && <span className="chip saved-count">{saved.length}</span>}
+                <ChevronDown size={12} />
+              </button>
+            }
+          >
+            <MenuItem onSelect={() => setSaveName(index ? `${index} search` : 'search')}>
+              Save current search…
+            </MenuItem>
+            {saved.length > 0 && <MenuSep />}
+            {saved.map((s) => (
+              <MenuItem key={s.name} onSelect={() => applySaved(s)}>
+                <span className="saved-item">
+                  <span className="saved-name">{s.name}</span>
+                  <span className="saved-index mono">{s.index}</span>
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    className="saved-del"
+                    title={`Delete “${s.name}”`}
+                    onClick={(e) => {
+                      // Deleting must not also apply the search behind it.
+                      e.stopPropagation()
+                      setSaved(deleteSaved(conn.id, s.name))
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key !== 'Enter' && e.key !== ' ') return
+                      e.stopPropagation()
+                      e.preventDefault()
+                      setSaved(deleteSaved(conn.id, s.name))
+                    }}
+                  >
+                    <Trash2 size={12} />
+                  </span>
+                </span>
+              </MenuItem>
+            ))}
+          </Menu>
           <Menu
             trigger={
               <button className="btn ghost" title="Export current page">
@@ -546,6 +622,41 @@ export function SearchTab({
           }}
         />
       )}
+
+      <Dialog.Root open={saveName !== null} onOpenChange={(o) => !o && setSaveName(null)}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="dlg-overlay" />
+          <Dialog.Content className="dlg-content" aria-describedby={undefined} style={{ width: 380 }}>
+            <Dialog.Title className="dlg-title">Save search</Dialog.Title>
+            <div className="dlg-form">
+              <div className="field">
+                <label>Name</label>
+                <input
+                  className="input"
+                  autoFocus
+                  value={saveName ?? ''}
+                  spellCheck={false}
+                  onChange={(e) => setSaveName(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && commitSave()}
+                />
+              </div>
+              <div style={{ fontSize: 11.5, color: 'var(--ink-3)' }}>
+                Saves the index, filters, sort and page size for this cluster. An existing
+                search with the same name is replaced.
+              </div>
+              <div className="dlg-foot">
+                <div className="spacer" />
+                <button className="btn ghost" onClick={() => setSaveName(null)}>
+                  Cancel
+                </button>
+                <button className="btn primary" disabled={!(saveName ?? '').trim()} onClick={commitSave}>
+                  Save
+                </button>
+              </div>
+            </div>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
     </div>
   )
 }

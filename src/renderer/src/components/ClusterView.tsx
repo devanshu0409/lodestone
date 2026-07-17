@@ -10,8 +10,9 @@ import { SearchWorkspace } from './SearchWorkspace'
 import { Console } from './Console'
 import { AnalyzerPlayground } from './AnalyzerPlayground'
 import { AggWorkspace } from './AggWorkspace'
+import { SqlWorkspace } from './SqlWorkspace'
 
-type Tab = 'overview' | 'shards' | 'indices' | 'search' | 'aggs' | 'console' | 'analyze'
+type Tab = 'overview' | 'shards' | 'indices' | 'search' | 'aggs' | 'sql' | 'console' | 'analyze'
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'overview', label: 'Overview' },
@@ -19,6 +20,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'indices', label: 'Indices' },
   { id: 'search', label: 'Search' },
   { id: 'aggs', label: 'Aggregations' },
+  { id: 'sql', label: 'SQL' },
   { id: 'console', label: 'Console' },
   { id: 'analyze', label: 'Analyze' }
 ]
@@ -166,6 +168,11 @@ export function ClusterView({ conn }: { conn: ClusterConnection }): React.JSX.El
       {visited.has('aggs') && (
         <TabPanel active={tab === 'aggs'}>
           <AggWorkspace conn={conn} />
+        </TabPanel>
+      )}
+      {visited.has('sql') && (
+        <TabPanel active={tab === 'sql'}>
+          <SqlWorkspace conn={conn} overview={session.overview} />
         </TabPanel>
       )}
       {visited.has('console') && (

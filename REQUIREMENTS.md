@@ -121,6 +121,13 @@ This project builds a modern, open-source **Electron desktop app** that solves a
   FR-4.2) scopes them; field dropdowns filtered to compatible mapped types. Results as
   a table per aggregation, or raw JSON.
 
+- FR-4.7 SQL query tab: visual SELECT / WHERE / JOIN / GROUP BY / ORDER BY / LIMIT
+  builders that compile to native `_search` (version- and distribution-independent),
+  with generated SQL text, a compiled-DSL viewer, and raw-SQL passthrough to
+  `_sql` (ES) / `_plugins/_sql` (OpenSearch). Joins execute client-side in
+  Lodestone with safety caps (left-row cap, batched terms lookups, output cap) —
+  never on the cluster.
+
 ### FR-5 Index Management
 - FR-5.1 Index list with health, docs count, size, shard/replica counts; search/filter.
 - FR-5.2 Create index (settings + mappings editor with validation).

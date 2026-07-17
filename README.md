@@ -127,6 +127,13 @@ in-app auto-update.
   structured filter (the same builder as Search) scopes the whole thing, field
   dropdowns are filtered to compatible types (text aggregates via `.keyword`
   automatically), and you can view the raw JSON at any point.
+- **SQL** — query with SQL, built visually: SELECT / WHERE / GROUP BY / ORDER BY
+  dropdowns compile to native `_search` requests (works on any ES/OpenSearch version,
+  no SQL plugin required — a "DSL" button shows the compiled request). **JOINs
+  included**: Lodestone executes them itself as bounded searches — capped left side,
+  batched `terms` lookups, hard output limit — so the cluster never runs a join and
+  a heavy query can't hurt it. Raw SQL mode passes through to `_sql` /
+  `_plugins/_sql` for server-side execution.
 - **Console** — a Dev-Tools-style REST console with multiple parallel request tabs,
   backed by a searchable API catalog: find an operation by intent ("update by query",
   "reindex") and get a documented, pre-filled template. Path autocomplete from the

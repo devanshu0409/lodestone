@@ -1425,6 +1425,71 @@ button.shard-chip.unassigned:hover {
   margin-bottom: 14px;
 }
 
+/* saved searches menu */
+.saved-count {
+  padding: 0 5px;
+  font-size: 10px;
+  line-height: 15px;
+}
+
+.saved-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 190px;
+}
+
+.saved-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.saved-index {
+  font-size: 10.5px;
+  color: var(--ink-3);
+}
+
+.saved-del {
+  display: flex;
+  align-items: center;
+  color: var(--ink-3);
+  border-radius: 3px;
+  padding: 2px;
+}
+
+.saved-del:hover {
+  color: var(--danger);
+  background: var(--surface-2);
+}
+
+/* sql tab — builder scrolls in its own zone so results keep viewport space */
+.sql-builder {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+}
+.sql-tab.has-result .sql-builder {
+  flex: 0 1 auto;
+  max-height: 48%;
+}
+
+/* layout modes — builder-only and result-only collapse the other zone */
+.sql-tab.layout-builder .sql-builder {
+  flex: 1;
+  max-height: none;
+}
+.sql-tab.layout-builder .result-meta,
+.sql-tab.layout-builder .search-json,
+.sql-tab.layout-builder .shard-grid-wrap {
+  display: none;
+}
+.sql-tab.layout-result .sql-builder {
+  display: none;
+}
+
 /* aggregations tab */
 .agg-filter {
   display: flex;

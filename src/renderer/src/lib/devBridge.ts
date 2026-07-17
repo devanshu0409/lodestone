@@ -7,7 +7,7 @@ import type {
   SaveConnectionPayload,
   UpdateStatus
 } from '@shared/types'
-import type { LodestoneApi } from '../../../preload'
+import type { LodestoneApi } from '../../../preload/api'
 
 /**
  * In-memory stand-in for the Electron IPC bridge so the renderer can run in a
@@ -147,6 +147,8 @@ const MOCK_MAPPING = {
     level: { type: 'keyword' },
     message: { type: 'text', fields: { keyword: { type: 'keyword', ignore_above: 256 } } },
     service: { type: 'keyword' },
+    // Array-valued in _source (like real ES tags) — exercises array join keys.
+    tags: { type: 'keyword' },
     bytes: { type: 'long' },
     duration_ms: { type: 'float' },
     success: { type: 'boolean' },
@@ -177,6 +179,7 @@ function mockSource(n: number): Record<string, unknown> {
     '@timestamp': new Date(Date.parse('2026-07-09T06:00:00Z') - n * 47_000).toISOString(),
     level: LEVELS[n % LEVELS.length],
     service: SERVICES[n % SERVICES.length],
+    tags: [SERVICES[n % SERVICES.length], LEVELS[n % LEVELS.length]],
     message: MESSAGES[n % MESSAGES.length].replace('{n}', String(n)),
     bytes: 512 + ((n * 7919) % 48_000),
     duration_ms: Math.round(((n * 13) % 900) * 10) / 10,
@@ -260,7 +263,15 @@ function mockMatches(source: Record<string, unknown>, q: MockQuery | undefined):
   let l: [string, unknown] | null
   if ((l = leaf(q, 'term'))) {
     const want = typeof l[1] === 'object' && l[1] !== null ? (l[1] as { value?: unknown }).value : l[1]
-    return String(mockFieldValue(source, l[0])) === String(want)
+    const have = mockFieldValue(source, l[0])
+    // Like real ES: an array-valued field matches if any element matches.
+    return (Array.isArray(have) ? have : [have]).some((h) => String(h) === String(want))
+  }
+  if ((l = leaf(q, 'terms'))) {
+    const wants = Array.isArray(l[1]) ? l[1] : []
+    const have = mockFieldValue(source, l[0])
+    const haves = (Array.isArray(have) ? have : [have]).map(String)
+    return wants.some((w) => haves.includes(String(w)))
   }
   if ((l = leaf(q, 'match')) || (l = leaf(q, 'match_phrase'))) {
     const want = typeof l[1] === 'object' && l[1] !== null ? (l[1] as { query?: unknown }).query : l[1]
@@ -591,6 +602,32 @@ export function installDevBridge(): void {
   const respond = (body: unknown): IpcResult<EsResponse> =>
     ok({ status: 200, ok: true, body, tookMs: 3, nodeUrl: 'mock://cluster' })
 
+  /** Minimal SELECT parser so Raw SQL mode demos offline:
+   *  SELECT cols FROM idx [WHERE field = 'value'] [LIMIT n] */
+  const ALL_COLS = ['@timestamp', 'level', 'service', 'message', 'bytes', 'duration_ms', 'success', 'user.id', 'user.name']
+  function mockSql(query: string, osDialect: boolean): unknown {
+    const m = query
+      .replace(/\s+/g, ' ')
+      .trim()
+      .match(/^select (.+?) from (\S+)(?: where (\S+) ?= ?'?([^' ]+)'?)?(?: limit (\d+))?$/i)
+    if (!m) {
+      return { error: { reason: `mock _sql only understands: SELECT cols FROM index [WHERE field = 'value'] [LIMIT n]` }, status: 400 }
+    }
+    const cols = m[1].trim() === '*' ? ALL_COLS : m[1].split(',').map((c) => c.trim())
+    const [whereField, whereValue, limit] = [m[3], m[4], Number(m[5] ?? 25)]
+    const rows: unknown[][] = []
+    for (let n = 0; n < MOCK_TOTAL && rows.length < limit; n++) {
+      const src = mockSource(n)
+      if (whereField && String(mockFieldValue(src, whereField)) !== whereValue) continue
+      rows.push(cols.map((c) => {
+        const v = mockFieldValue(src, c)
+        return v !== null && typeof v === 'object' ? JSON.stringify(v) : (v ?? null)
+      }))
+    }
+    const colDefs = cols.map((name) => ({ name, type: 'keyword' }))
+    return osDialect ? { schema: colDefs, datarows: rows } : { columns: colDefs, rows }
+  }
+
   const api: LodestoneApi = {
     connections: {
       list: async () => ok([...connections]),
@@ -620,6 +657,11 @@ export function installDevBridge(): void {
       request: async (id: string, spec: EsRequestSpec): Promise<IpcResult<EsResponse>> => {
         const isProd = id === 'demo-prod'
         const path = spec.path.split('?')[0]
+        // Raw-SQL passthrough endpoints (a tiny SELECT subset, demo only).
+        if (path === '/_sql' || path === '/_plugins/_sql') {
+          const q = (spec.body as { query?: string } | undefined)?.query ?? ''
+          return respond(mockSql(q, path.startsWith('/_plugins')))
+        }
         if (path.startsWith('/_cat/nodes')) return respond(catNodes(isProd))
         if (path.startsWith('/_cat/indices'))
           return respond(catIndices(isProd ? PROD_INDICES : STAGING_INDICES))
