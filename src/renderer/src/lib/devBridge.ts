@@ -157,9 +157,21 @@ const MOCK_MAPPING = {
         id: { type: 'keyword' },
         name: { type: 'text', fields: { keyword: { type: 'keyword' } } }
       }
+    },
+    // A real `nested` type — exercises nested aggregations (subfields need a
+    // `nested` agg wrapper or the cluster returns nothing).
+    items: {
+      type: 'nested',
+      properties: {
+        sku: { type: 'keyword' },
+        qty: { type: 'integer' },
+        price: { type: 'float' }
+      }
     }
   }
 }
+
+const ITEM_SKUS = ['A-100', 'B-200', 'C-300', 'D-400']
 
 const LEVELS = ['info', 'info', 'info', 'warn', 'error', 'debug']
 const SERVICES = ['checkout', 'search-api', 'auth', 'catalog', 'payments']
@@ -184,7 +196,13 @@ function mockSource(n: number): Record<string, unknown> {
     bytes: 512 + ((n * 7919) % 48_000),
     duration_ms: Math.round(((n * 13) % 900) * 10) / 10,
     success: n % 7 !== 0,
-    user: { id: `u-${(n * 31) % 5000}`, name: `User ${(n * 31) % 5000}` }
+    user: { id: `u-${(n * 31) % 5000}`, name: `User ${(n * 31) % 5000}` },
+    // 1–3 line items per doc — an array of objects, stored as a real `nested` field.
+    items: Array.from({ length: 1 + (n % 3) }, (_, i) => ({
+      sku: ITEM_SKUS[(n + i) % ITEM_SKUS.length],
+      qty: 1 + ((n + i) % 5),
+      price: 10 + (((n + i) * 7) % 90)
+    }))
   }
 }
 
@@ -214,6 +232,7 @@ interface MockAggSpec {
   cardinality?: { field: string }
   stats?: { field: string }
   percentiles?: { field: string }
+  nested?: { path: string }
   aggs?: Record<string, MockAggSpec>
 }
 
@@ -368,6 +387,23 @@ function mockAggregations(
 ): Record<string, unknown> {
   const out: Record<string, unknown> = {}
   for (const [name, spec] of Object.entries(aggs)) {
+    // `nested` agg: explode each parent's nested array into one sub-doc per
+    // element, then run the child aggs over those. Mirrors how ES indexes
+    // nested objects as separate hidden docs. The sub-doc reuses the parent so
+    // full-path fields (e.g. items.sku) still resolve.
+    if (spec.nested) {
+      const path = spec.nested.path
+      const subDocs: Record<string, unknown>[] = []
+      for (const d of docs) {
+        const arr = mockFieldValue(d, path)
+        if (Array.isArray(arr)) for (const el of arr) subDocs.push({ ...d, [path]: el })
+      }
+      out[name] = {
+        doc_count: subDocs.length,
+        ...(spec.aggs ? mockAggregations(spec.aggs, subDocs) : {})
+      }
+      continue
+    }
     const bucketDef =
       spec.terms ?? spec.significant_terms ?? spec.histogram ?? spec.date_histogram ?? spec.range ?? spec.missing
     if (bucketDef) {

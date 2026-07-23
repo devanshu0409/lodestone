@@ -99,6 +99,85 @@ export function ConfirmDialog({
   )
 }
 
+/* ---------- name prompt dialog ---------- */
+
+/**
+ * Single-line text prompt. Electron's renderer disables window.prompt (it
+ * throws "prompt() is not supported"), so anything that needs a name — saving a
+ * console request, an aggregation, etc. — routes through this instead.
+ * Controlled by `open`; `onSubmit` fires with the trimmed value, never empty.
+ */
+export function PromptDialog({
+  open,
+  title,
+  label,
+  placeholder,
+  initialValue = '',
+  hint,
+  submitLabel = 'Save',
+  onSubmit,
+  onClose
+}: {
+  open: boolean
+  title: string
+  label: string
+  placeholder?: string
+  initialValue?: string
+  hint?: React.ReactNode
+  submitLabel?: string
+  onSubmit: (value: string) => void
+  onClose: () => void
+}): React.JSX.Element {
+  const [text, setText] = useState(initialValue)
+  const trimmed = text.trim()
+
+  const submit = (): void => {
+    if (!trimmed) return
+    onSubmit(trimmed)
+    onClose()
+  }
+
+  return (
+    <Dialog.Root
+      open={open}
+      // Radix mounts the content fresh each open; seed the field from
+      // initialValue at that moment so consecutive prompts don't leak text.
+      onOpenChange={(o) => (o ? setText(initialValue) : onClose())}
+    >
+      <Dialog.Portal>
+        <Dialog.Overlay className="dlg-overlay" />
+        <Dialog.Content className="dlg-content" aria-describedby={undefined} style={{ width: 380 }}>
+          <Dialog.Title className="dlg-title">{title}</Dialog.Title>
+          <div className="dlg-form">
+            <div className="field">
+              <label>{label}</label>
+              <input
+                className="input"
+                autoFocus
+                value={text}
+                placeholder={placeholder}
+                spellCheck={false}
+                onChange={(e) => setText(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && submit()}
+              />
+            </div>
+            {hint && <div style={{ fontSize: 11.5, color: 'var(--ink-3)' }}>{hint}</div>}
+            <div className="dlg-foot">
+              <div className="spacer" />
+              <button className="btn ghost" onClick={onClose}>
+                Cancel
+              </button>
+              <button className="btn primary" disabled={!trimmed} onClick={submit}>
+                {submitLabel}
+              </button>
+            </div>
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  )
+}
+
 /* ---------- dropdown menu ---------- */
 
 export function Menu({

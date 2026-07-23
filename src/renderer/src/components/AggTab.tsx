@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Play, Plus, X } from 'lucide-react'
+import { ChevronDown, Play, Plus, Star, Trash2, X } from 'lucide-react'
 import type { ClusterConnection } from '@shared/types'
 import {
   esJson,
@@ -9,9 +9,12 @@ import {
   type MappedField
 } from '../lib/api'
 import { buildQuery, hasActiveFilter, newRow, type FilterRow } from '../lib/filterQuery'
+import { deleteSavedAgg, listSavedAggs, saveAgg, type SavedAgg } from '../lib/savedAggs'
+import { useApp } from '../store'
 import { FilterRows } from './FilterRows'
 import { IndexPicker } from './SearchTab'
 import { JsonView } from './JsonView'
+import { Menu, MenuItem, MenuSep, PromptDialog } from './ui'
 
 /* ------------------------------------------------------------------ *
  * A single aggregation = a nesting chain of bucket levels (outer → inner)
@@ -58,6 +61,10 @@ const METRIC_OPTIONS: { value: MetricType; label: string; numeric: boolean }[] =
 ]
 
 const CALENDAR_INTERVALS = ['minute', 'hour', 'day', 'week', 'month', 'quarter', 'year']
+
+// Synthetic key for the `nested` agg wrapper we inject around nested-field
+// aggregations; the response is unwrapped here before shaping.
+const NESTED_KEY = 'nested_agg'
 
 const NUMERIC_TYPES = new Set([
   'long', 'integer', 'short', 'byte', 'double', 'float',
@@ -129,6 +136,9 @@ export function AggTab({
   const [error, setError] = useState<string | null>(null)
   const [response, setResponse] = useState<AggResponse | null>(null)
   const [view, setView] = useState<'table' | 'json'>('table')
+  const [saved, setSaved] = useState<SavedAgg[]>([])
+  const [saveOpen, setSaveOpen] = useState(false)
+  const pushToast = useApp((s) => s.pushToast)
 
   useEffect(() => {
     Promise.all([fetchCatIndices(conn.id), fetchCatAliases(conn.id)])
@@ -159,6 +169,27 @@ export function AggTab({
   }, [index])
 
   const fieldMap = useMemo(() => new Map(fields.map((f) => [f.path, f])), [fields])
+  const pendingRestoreRef = useRef<SavedAgg | null>(null)
+
+  useEffect(() => setSaved(listSavedAggs(conn.id)), [conn.id])
+
+  const applySaved = (s: SavedAgg): void => {
+    if (s.index === index) {
+      // Same index — mapping already loaded, apply straight away.
+      setLevels(s.levels as BucketLevel[])
+      setMetrics(s.metrics as MetricRow[])
+      setFilterRows(s.filterRows.length ? s.filterRows : [newRow()])
+    } else {
+      // Defer to the re-anchor effect once the new index's fields have loaded.
+      pendingRestoreRef.current = s
+      setIndex(s.index)
+    }
+  }
+
+  const commitSave = (name: string): void => {
+    setSaved(saveAgg(conn.id, { name, index, filterRows, levels, metrics, savedAt: Date.now() }))
+    pushToast('ok', `Saved “${name}”`)
+  }
 
   // Field choices per role. Aggregations run on exact values, so text fields
   // participate via their .keyword sub-field (sortPath).
@@ -197,8 +228,19 @@ export function AggTab({
   const patchMetric = (id: number, p: Partial<MetricRow>): void =>
     setMetrics((ms) => ms.map((m) => (m.id === id ? { ...m, ...p } : m)))
 
-  // Re-anchor fields to the current index's mapping when it changes.
+  // Re-anchor fields to the current index's mapping when it changes. A saved
+  // agg being restored across an index switch lands its levels/metrics here
+  // instead — once the new mapping has loaded — so the re-anchor validates the
+  // restored fields against the right mapping rather than the outgoing one.
   useEffect(() => {
+    const pending = pendingRestoreRef.current
+    if (pending) {
+      pendingRestoreRef.current = null
+      setLevels(pending.levels as BucketLevel[])
+      setMetrics(pending.metrics as MetricRow[])
+      setFilterRows(pending.filterRows.length ? pending.filterRows : [newRow()])
+      return
+    }
     setLevels((ls) =>
       ls.map((l) => {
         const choices = bucketChoices(l.bucketType)
@@ -248,13 +290,41 @@ export function AggTab({
     }
   }
 
+  /**
+   * The `nested` path shared by every bucket + metric field, if any.
+   * Returns undefined when nothing is nested. Throws when fields mix root and
+   * nested (or span two nested paths): that needs `reverse_nested` to climb
+   * back out, which this builder doesn't emit — better to refuse than report
+   * silently wrong doc counts.
+   * ponytail: single nested path only; reverse_nested for mixed if it comes up.
+   */
+  const sharedNestedPath = (): string | undefined => {
+    const paths = new Set<string | undefined>()
+    for (const l of levels) if (l.bucketField) paths.add(fieldMap.get(l.bucketField)?.nestedPath)
+    for (const m of metrics) if (m.field) paths.add(fieldMap.get(m.field)?.nestedPath)
+    const nested = [...paths].filter((p): p is string => !!p)
+    if (nested.length === 0) return undefined
+    if (nested.length > 1 || paths.has(undefined)) {
+      throw new Error(
+        'This aggregation mixes a nested field with a root or a different nested field. ' +
+          'Keep every bucket and metric field under the same nested field.'
+      )
+    }
+    return nested[0]
+  }
+
   const buildAggs = (): Record<string, unknown> | null => {
     const metricAggs: Record<string, unknown> = {}
     for (const m of metrics) {
       if (m.field) metricAggs[metricKey(m)] = { [m.type]: { field: esField(m.field) } }
     }
+    // Nested subfields need a `nested` agg wrapper or the cluster returns nothing.
+    const nestedPath = sharedNestedPath()
+    const wrap = (tree: Record<string, unknown>): Record<string, unknown> =>
+      nestedPath ? { [NESTED_KEY]: { nested: { path: nestedPath }, aggs: tree } } : tree
+
     // No grouping → metrics over all matching docs.
-    if (levels.length === 0) return Object.keys(metricAggs).length ? metricAggs : null
+    if (levels.length === 0) return Object.keys(metricAggs).length ? wrap(metricAggs) : null
     if (levels.some((l) => !l.bucketField)) return null
     // Recursively nest: level i's sub-aggs are keyed `l{i+1}`; the leaf holds metrics.
     const buildLevel = (i: number): Record<string, unknown> | null => {
@@ -272,11 +342,19 @@ export function AggTab({
       return node
     }
     const top = buildLevel(0)
-    return top ? { agg: top } : null
+    return top ? wrap({ agg: top }) : null
   }
 
   const run = async (): Promise<void> => {
-    const aggs = buildAggs()
+    let aggs: Record<string, unknown> | null
+    try {
+      aggs = buildAggs()
+    } catch (err) {
+      // sharedNestedPath throws on an unsupported nested/root mix.
+      setError((err as Error).message)
+      setResponse(null)
+      return
+    }
     if (!aggs) {
       setError('Configure a group-by field, or add a metric.')
       return
@@ -327,6 +405,14 @@ export function AggTab({
     return formatNum(v)
   }
 
+  // A nested-field aggregation is wrapped in a `nested` agg; the real buckets/
+  // metrics sit one level in. Descend through it so shaping is wrapper-agnostic.
+  const aggRoot = ((): Record<string, unknown> | undefined => {
+    const a = response?.aggregations
+    const wrapped = a?.[NESTED_KEY] as Record<string, unknown> | undefined
+    return wrapped ?? a
+  })()
+
   /** Flatten the nested-bucket response into one row per leaf bucket. */
   const flatten = (): { keys: unknown[]; doc_count: number; bucket: Bucket }[] => {
     const rows: { keys: unknown[]; doc_count: number; bucket: Bucket }[] = []
@@ -338,7 +424,7 @@ export function AggTab({
         else walk(b[`l${i + 1}`], i + 1, path)
       }
     }
-    walk(response?.aggregations?.agg, 0, [])
+    walk(aggRoot?.agg, 0, [])
     return rows
   }
 
@@ -350,6 +436,44 @@ export function AggTab({
       <div className="grid-toolbar">
         <IndexPicker targets={targets} value={index} onChange={setIndex} />
         <div className="spacer" />
+        <Menu
+          trigger={
+            <button className="btn ghost" title="Saved aggregations">
+              <Star size={13} /> Saved
+              {saved.length > 0 && <span className="chip saved-count">{saved.length}</span>}
+              <ChevronDown size={12} />
+            </button>
+          }
+        >
+          <MenuItem onSelect={() => setSaveOpen(true)}>Save current aggregation…</MenuItem>
+          {saved.length > 0 && <MenuSep />}
+          {saved.map((s) => (
+            <MenuItem key={s.name} onSelect={() => applySaved(s)}>
+              <span className="saved-item">
+                <span className="saved-name">{s.name}</span>
+                <span className="saved-index mono">{s.index}</span>
+                <span
+                  role="button"
+                  tabIndex={0}
+                  className="saved-del"
+                  title={`Delete “${s.name}”`}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setSaved(deleteSavedAgg(conn.id, s.name))
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key !== 'Enter' && e.key !== ' ') return
+                    e.stopPropagation()
+                    e.preventDefault()
+                    setSaved(deleteSavedAgg(conn.id, s.name))
+                  }}
+                >
+                  <Trash2 size={12} />
+                </span>
+              </span>
+            </MenuItem>
+          ))}
+        </Menu>
         <button className="btn primary" disabled={running || !index} onClick={() => void run()}>
           <Play size={12} />
           {running ? 'Running…' : 'Run'}
@@ -554,7 +678,7 @@ export function AggTab({
                   {metrics.map((m) => (
                     <tr key={m.id}>
                       <td>{metricLabel(m)}</td>
-                      <td className="mono">{renderMetricValue(response.aggregations?.[metricKey(m)])}</td>
+                      <td className="mono">{renderMetricValue(aggRoot?.[metricKey(m)])}</td>
                     </tr>
                   ))}
                   {metrics.length === 0 && (
@@ -617,6 +741,17 @@ export function AggTab({
           with a filter, then Run. Use the + tab above to run another aggregation side by side.
         </p>
       )}
+
+      <PromptDialog
+        open={saveOpen}
+        title="Save aggregation"
+        label="Name"
+        placeholder="e.g. Errors by service"
+        initialValue={index ? `${index} aggregation` : 'aggregation'}
+        hint="Saves the index, filter, bucket levels and metrics for this cluster."
+        onSubmit={commitSave}
+        onClose={() => setSaveOpen(false)}
+      />
     </div>
   )
 }

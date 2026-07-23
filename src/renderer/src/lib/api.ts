@@ -155,6 +155,12 @@ export interface MappedField {
   type: string
   /** Field to sort/aggregate on (e.g. the .keyword multi-field for text), if any. */
   sortPath?: string
+  /**
+   * If this field lives under a `nested`-type parent, the path of that parent.
+   * Aggregating/sorting a nested subfield requires a `nested` agg wrapper —
+   * without it the cluster silently returns nothing.
+   */
+  nestedPath?: string
 }
 
 const SORTABLE_TYPES = new Set([
@@ -183,20 +189,22 @@ interface MappingProperty {
 function flattenProperties(
   props: Record<string, MappingProperty> | undefined,
   prefix: string,
-  out: MappedField[]
+  out: MappedField[],
+  nestedPath?: string
 ): void {
   for (const [name, prop] of Object.entries(props ?? {})) {
     const path = prefix ? `${prefix}.${name}` : name
     if (prop.properties) {
-      if (prop.type) out.push(fieldOf(path, prop)) // e.g. explicit "object"/"nested"
-      flattenProperties(prop.properties, path, out)
+      if (prop.type) out.push(fieldOf(path, prop, nestedPath)) // e.g. explicit "object"/"nested"
+      // Subfields of a `nested` parent inherit its path so aggregations can wrap them.
+      flattenProperties(prop.properties, path, out, prop.type === 'nested' ? path : nestedPath)
     } else if (prop.type) {
-      out.push(fieldOf(path, prop))
+      out.push(fieldOf(path, prop, nestedPath))
     }
   }
 }
 
-function fieldOf(path: string, prop: MappingProperty): MappedField {
+function fieldOf(path: string, prop: MappingProperty, nestedPath?: string): MappedField {
   const type = prop.type ?? 'object'
   let sortPath: string | undefined
   if (SORTABLE_TYPES.has(type)) {
@@ -205,7 +213,7 @@ function fieldOf(path: string, prop: MappingProperty): MappedField {
     const kw = Object.entries(prop.fields ?? {}).find(([, f]) => f.type === 'keyword')
     if (kw) sortPath = `${path}.${kw[0]}`
   }
-  return { path, type, sortPath }
+  return { path, type, sortPath, ...(nestedPath ? { nestedPath } : {}) }
 }
 
 /** Flattened field list for an index/alias (union across concrete indices behind it). */

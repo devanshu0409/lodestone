@@ -25,7 +25,7 @@ import { ProfileTree } from './ProfileTree'
 import { SearchResults } from './SearchResults'
 import { ExplainTree } from './ExplainTree'
 import { TabStrip } from './TabStrip'
-import { Menu, MenuItem } from './ui'
+import { Menu, MenuItem, PromptDialog } from './ui'
 
 const METHODS: HttpMethod[] = ['GET', 'POST', 'PUT', 'DELETE', 'HEAD']
 
@@ -257,11 +257,10 @@ export function Console({
 
   const activeIndex = indexFromPath(active.path)
 
-  const save = (): void => {
-    const name = window.prompt('Save this request as:', `${active.method} ${active.path}`)
-    if (!name) return
-    setSaved(saveRequest(conn.id, name.trim(), { method: active.method, path: active.path, body: active.body }))
-    pushToast('ok', `Saved "${name.trim()}"`)
+  const [saveOpen, setSaveOpen] = useState(false)
+  const commitSave = (name: string): void => {
+    setSaved(saveRequest(conn.id, name, { method: active.method, path: active.path, body: active.body }))
+    pushToast('ok', `Saved "${name}"`)
     setPanel('saved')
   }
 
@@ -432,7 +431,7 @@ export function Console({
             {isSearch && <MenuItem onSelect={copySpring}>Copy as Java — Spring Data</MenuItem>}
             {isSearch && <MenuItem onSelect={copyJavaApi}>Copy as Java — API Client</MenuItem>}
           </Menu>
-          <button className="btn" title="Save request" onClick={save}>
+          <button className="btn" title="Save request" onClick={() => setSaveOpen(true)}>
             <Save size={13} />
           </button>
           <button className="btn primary" disabled={active.running} onClick={() => void run()}>
@@ -513,6 +512,17 @@ export function Console({
           </div>
         </div>
       </section>
+
+      <PromptDialog
+        open={saveOpen}
+        title="Save request"
+        label="Name"
+        placeholder="e.g. Top errors last hour"
+        initialValue={`${active.method} ${active.path}`}
+        hint="Stored for this cluster. Find it under the Saved panel."
+        onSubmit={commitSave}
+        onClose={() => setSaveOpen(false)}
+      />
     </div>
   )
 }
